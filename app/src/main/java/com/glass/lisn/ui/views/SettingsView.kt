@@ -66,6 +66,24 @@ fun SettingsView(vm: AppViewModel) {
             }
         }
 
+        // 播放模式
+        SectionCard(title = "播放模式", desc = "队列播完后的行为;随机模式在整队内随机跳曲") {
+            val opts = listOf("loop" to "列表循环", "one" to "单曲循环", "shuffle" to "随机")
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+                opts.forEachIndexed { i, (m, label) ->
+                    SegmentedButton(
+                        selected = s.playMode == m,
+                        onClick = {
+                            vm.patchSettings(s.copy(playMode = m))
+                            vm.player.setPlayMode(m)
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index = i, count = opts.size),
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
+
         // 解析模式
         SectionCard(
             title = "解析模式",

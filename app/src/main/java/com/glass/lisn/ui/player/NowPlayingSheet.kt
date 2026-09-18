@@ -19,6 +19,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Repeat
+import androidx.compose.material.icons.filled.RepeatOne
+import androidx.compose.material.icons.filled.Shuffle
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +51,7 @@ import coil.compose.AsyncImage
 import com.glass.lisn.EngineHub
 import com.glass.lisn.ui.AppViewModel
 import com.glass.lisn.ui.theme.Aurora3
+import com.glass.lisn.ui.theme.Text1
 import com.glass.lisn.ui.theme.Text2
 import com.glass.lisn.ui.theme.Text3
 import kotlinx.coroutines.launch
@@ -90,13 +94,15 @@ fun NowPlayingSheet(vm: AppViewModel) {
     val positionMs by vm.player.positionMs.collectAsState()
     val durationMs by vm.player.durationMs.collectAsState()
     val localTitle by vm.player.currentLocalTitle.collectAsState()
+    val playMode by vm.player.playMode.collectAsState()
 
     val song = playback.queue.getOrNull(playback.queueIdx)
     val title = song?.name ?: (localTitle ?: "未在播放")
     val artist = song?.artist ?: "本地音乐"
 
     var lrc by remember(song?.key ?: localTitle) { mutableStateOf<List<LrcLine>>(emptyList()) }
-    var showLyric by remember { mutableStateOf(false) }
+    // 中部区域三态:封面 / 歌词 / 队列
+    var centerTab by remember { mutableStateOf("cover") } // cover | lyric | queue
     LaunchedEffect(song?.key ?: localTitle) {
         lrc = emptyList()
         val s = song ?: return@LaunchedEffect
@@ -109,8 +115,8 @@ fun NowPlayingSheet(vm: AppViewModel) {
         if (lrc.isEmpty()) -1 else (lrc.indexOfLast { it.timeMs <= positionMs + 300 }.takeIf { it >= 0 } ?: -1)
     }
     val listState = rememberLazyListState()
-    LaunchedEffect(currentLine, showLyric) {
-        if (showLyric && currentLine >= 0) {
+    LaunchedEffect(currentLine, centerTab) {
+        if (centerTab == "lyric" && currentLine >= 0) {
             runCatching { listState.animateScrollToItem(maxOf(0, currentLine - 4)) }
         }
     }
@@ -136,60 +142,102 @@ fun NowPlayingSheet(vm: AppViewModel) {
             Spacer(Modifier.size(48.dp))
         }
 
-        // 中部:封面 或 歌词
+        // 中部:封面 / 歌词 / 队列
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-            if (showLyric) {
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (lrc.isEmpty()) {
-                        item {
-                            Text("暂无歌词", style = MaterialTheme.typography.bodyMedium, color = Text3,
-                                modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp), textAlign = TextAlign.Center)
-                        }
-                    } else {
-                        items(lrc.size) { i ->
-                            val line = lrc[i]
-                            val active = i == currentLine
-                            Text(
-                                line.text.ifEmpty { "···" },
-                                fontSize = if (active) 17.sp else 14.sp,
-                                color = if (active) MaterialTheme.colorScheme.primary else Text2,
-                                textAlign = TextAlign.Center,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { vm.player.seekTo(line.timeMs) }
-                                    .padding(vertical = 8.dp, horizontal = 8.dp)
-                            )
+            when (centerTab) {
+                "lyric" -> {
+                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (lrc.isEmpty()) {
+                            item {
+                                Text("暂无歌词", style = MaterialTheme.typography.bodyMedium, color = Text3,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp), textAlign = TextAlign.Center)
+                            }
+                        } else {
+                            items(lrc.size) { i ->
+                                val line = lrc[i]
+                                val active = i == currentLine
+                                Text(
+                                    line.text.ifEmpty { "···" },
+                                    fontSize = if (active) 17.sp else 14.sp,
+                                    color = if (active) MaterialTheme.colorScheme.primary else Text2,
+                                    textAlign = TextAlign.Center,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { vm.player.seekTo(line.timeMs) }
+                                        .padding(vertical = 8.dp, horizontal = 8.dp)
+                                )
+                            }
                         }
                     }
                 }
-            } else {
-                Box(
-                    Modifier
-                        .size(280.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (!song?.picUrl.isNullOrEmpty()) {
-                        AsyncImage(song.picUrl, null, Modifier.size(280.dp), contentScale = ContentScale.Crop)
-                    } else {
-                        Text("♪", fontSize = 64.sp, color = Text3)
+                "queue" -> {
+                    LazyColumn(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                        if (playback.queue.isEmpty()) {
+                            item {
+                                Text("队列是空的", style = MaterialTheme.typography.bodyMedium, color = Text3,
+                                    modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp), textAlign = TextAlign.Center)
+                            }
+                        } else {
+                            items(playback.queue.size) { i ->
+                                val q = playback.queue[i]
+                                val active = i == playback.queueIdx
+                                Column(
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .clickable {
+                                            val s = playback.queue.getOrNull(i)
+                                            if (s != null) vm.player.play(s, playback.queue, i)
+                                        }
+                                        .padding(vertical = 8.dp, horizontal = 12.dp)
+                                ) {
+                                    Text(
+                                        "${i + 1}. ${q.name}",
+                                        fontSize = if (active) 15.sp else 13.sp,
+                                        color = if (active) MaterialTheme.colorScheme.primary else Text1,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        q.artist,
+                                        fontSize = 11.sp,
+                                        color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else Text3,
+                                        maxLines = 1, overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                else -> {
+                    Box(
+                        Modifier
+                            .size(280.dp)
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (!song?.picUrl.isNullOrEmpty()) {
+                            AsyncImage(song.picUrl, null, Modifier.size(280.dp), contentScale = ContentScale.Crop)
+                        } else {
+                            Text("♪", fontSize = 64.sp, color = Text3)
+                        }
                     }
                 }
             }
         }
 
-        // 歌词/封面切换 + 解析信息
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
-            Text(
-                if (showLyric) "查看封面" else "查看歌词",
-                style = MaterialTheme.typography.bodySmall,
-                color = Aurora3,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .clickable { showLyric = !showLyric }
-                    .padding(horizontal = 14.dp, vertical = 6.dp)
-            )
+        // 封面/歌词/队列 切换 + 解析信息
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            listOf("cover" to "封面", "lyric" to "歌词", "queue" to "队列").forEach { (tab, label) ->
+                Text(
+                    label,
+                    fontSize = 12.sp,
+                    color = if (centerTab == tab) MaterialTheme.colorScheme.primary else Text2,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(10.dp))
+                        .clickable { centerTab = tab }
+                        .padding(horizontal = 14.dp, vertical = 6.dp)
+                )
+            }
         }
         if (playback.resolveInfo != null) {
             Text(
@@ -229,6 +277,28 @@ fun NowPlayingSheet(vm: AppViewModel) {
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            IconButton(
+                onClick = {
+                    val next = when (playMode) { "loop" -> "shuffle"; "shuffle" -> "one"; else -> "loop" }
+                    vm.player.setPlayMode(next)
+                },
+                modifier = Modifier.size(56.dp)
+            ) {
+                Icon(
+                    when (playMode) {
+                        "one" -> Icons.Filled.RepeatOne
+                        "shuffle" -> Icons.Filled.Shuffle
+                        else -> Icons.Filled.Repeat
+                    },
+                    when (playMode) {
+                        "one" -> "单曲循环"
+                        "shuffle" -> "随机播放"
+                        else -> "列表循环"
+                    },
+                    modifier = Modifier.size(28.dp),
+                    tint = if (playMode == "loop") Text1 else MaterialTheme.colorScheme.primary
+                )
+            }
             IconButton(onClick = { vm.player.prev() }, modifier = Modifier.size(56.dp)) {
                 Icon(Icons.Filled.SkipPrevious, "上一曲", modifier = Modifier.size(36.dp))
             }

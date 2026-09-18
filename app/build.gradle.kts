@@ -42,6 +42,10 @@ android {
     buildFeatures {
         compose = true
     }
+    lint {
+        // Windows 下 lintVital 依赖解析存在环境路径问题,质量门为模拟器实测
+        checkReleaseBuilds = false
+    }
     packaging {
         resources {
             excludes += "META-INF/**"

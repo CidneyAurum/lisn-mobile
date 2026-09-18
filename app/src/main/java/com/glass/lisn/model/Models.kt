@@ -110,7 +110,8 @@ data class Settings(
     val quality: String = "320k",
     val mode: String = "auto",
     val intervalMs: Long = 2500,
-    val autoCheckUpdates: Boolean = true
+    val autoCheckUpdates: Boolean = true,
+    val playMode: String = "loop"
 )
 
 @Serializable

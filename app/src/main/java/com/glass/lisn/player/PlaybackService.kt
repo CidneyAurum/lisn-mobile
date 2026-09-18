@@ -32,10 +32,12 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
+import kotlin.random.Random
 
 /**
  * 后台播放服务:服务侧持有播放队列,按需解析流地址(播放时才解析,
  * 与桌面端一致),通知栏显示上/下一首自定义按钮,STATE_ENDED 自动切下一曲。
+ * 播放模式:loop 列表循环 / one 单曲循环 / shuffle 随机。
  */
 class PlaybackService : MediaSessionService() {
 
@@ -45,6 +47,7 @@ class PlaybackService : MediaSessionService() {
     private var queueIdx: Int = -1
     private var quality: String = "320k"
     private var pinnedProviderId: String? = null
+    private var playMode: String = "loop"
     private var resolveJob: Job? = null
 
     private val player: ExoPlayer?
@@ -53,6 +56,7 @@ class PlaybackService : MediaSessionService() {
     override fun onCreate() {
         super.onCreate()
         quality = EngineHub.settings.get().quality
+        playMode = EngineHub.settings.get().playMode
 
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(UA)
@@ -72,6 +76,7 @@ class PlaybackService : MediaSessionService() {
             .setMediaSourceFactory(DefaultMediaSourceFactory(httpFactory))
             .build()
         p.addListener(playerListener)
+        applyRepeatMode(p)
 
         val prevButton = CommandButton.Builder()
             .setSessionCommand(SessionCommand(SessionCommands.PREV, Bundle.EMPTY))
@@ -88,6 +93,11 @@ class PlaybackService : MediaSessionService() {
             .setCallback(sessionCallback)
             .setCustomLayout(ImmutableList.of(prevButton, nextButton))
             .build()
+    }
+
+    private fun applyRepeatMode(p: ExoPlayer) {
+        // 单曲循环交给 ExoPlayer 无缝处理(STATE_ENDED 不再触发)
+        p.repeatMode = if (playMode == "one") Player.REPEAT_MODE_ONE else Player.REPEAT_MODE_OFF
     }
 
     private val playerListener = object : Player.Listener {
@@ -131,6 +141,16 @@ class PlaybackService : MediaSessionService() {
                 pinnedProviderId = args.getString("pinned")?.ifEmpty { null }
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+            SessionCommands.SET_PLAY_MODE -> {
+                val mode = args.getString("mode")
+                if (mode == "loop" || mode == "one" || mode == "shuffle") {
+                    playMode = mode
+                    EngineHub.settings.patch(EngineHub.settings.get().copy(playMode = mode))
+                    scope.launch(Dispatchers.Main) { player?.let { applyRepeatMode(it) } }
+                    broadcast()
+                }
+                Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             else -> Futures.immediateFuture(SessionResult(SessionResult.RESULT_ERROR_NOT_SUPPORTED))
         }
 
@@ -145,6 +165,7 @@ class PlaybackService : MediaSessionService() {
                 .add(SessionCommand(SessionCommands.NEXT, Bundle.EMPTY))
                 .add(SessionCommand(SessionCommands.PREV, Bundle.EMPTY))
                 .add(SessionCommand(SessionCommands.SET_PINNED, Bundle.EMPTY))
+                .add(SessionCommand(SessionCommands.SET_PLAY_MODE, Bundle.EMPTY))
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
@@ -208,7 +229,13 @@ class PlaybackService : MediaSessionService() {
 
     private suspend fun advance(delta: Int) {
         if (queue.isEmpty()) return
-        queueIdx = (queueIdx + delta + queue.size) % queue.size
+        queueIdx = if (playMode == "shuffle" && queue.size > 1) {
+            var next = queueIdx
+            while (next == queueIdx) next = Random.nextInt(queue.size)
+            next
+        } else {
+            (queueIdx + delta + queue.size) % queue.size
+        }
         resolveAndPlay()
     }
 
@@ -220,6 +247,7 @@ class PlaybackService : MediaSessionService() {
             putString("queue", json.encodeToString(ListSerializer(Song.serializer()), queue))
             putInt("index", queueIdx)
             putBoolean("loading", loading ?: (resolveJob?.isActive == true))
+            putString("mode", playMode)
             if (error != null) putString("error", error)
             if (resolve != null) putString("resolve", resolve)
         }

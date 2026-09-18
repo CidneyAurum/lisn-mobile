@@ -33,6 +33,7 @@ object SessionCommands {
     const val NEXT = "glass.next"
     const val STATE = "glass.state"
     const val SET_PINNED = "glass.setPinned"
+    const val SET_PLAY_MODE = "glass.setPlayMode"
 }
 
 /** 一次播放状态的广播(歌单快照 + 当前曲 + 加载/错误) */
@@ -64,6 +65,8 @@ class PlayerClient(context: Context) {
     val currentMediaId: StateFlow<String?> = _currentMediaId
     private val _currentLocalTitle = MutableStateFlow<String?>(null)
     val currentLocalTitle: StateFlow<String?> = _currentLocalTitle
+    private val _playMode = MutableStateFlow("loop")
+    val playMode: StateFlow<String> = _playMode
     private val _playback = MutableStateFlow(PlaybackState())
     val playback: StateFlow<PlaybackState> = _playback
 
@@ -164,6 +167,11 @@ class PlayerClient(context: Context) {
         controller?.sendCustomCommand(SessionCommand(SessionCommands.SET_PINNED, Bundle.EMPTY), args)
     }
 
+    fun setPlayMode(mode: String) {
+        val args = Bundle().apply { putString("mode", mode) }
+        controller?.sendCustomCommand(SessionCommand(SessionCommands.SET_PLAY_MODE, Bundle.EMPTY), args)
+    }
+
     /** 控制器侧接收服务广播(在 service 中回调,见 PlaybackService.stateBroadcast) */
     fun onStateBroadcast(args: Bundle) {
         val queueJson = args.getString("queue") ?: return
@@ -178,6 +186,7 @@ class PlayerClient(context: Context) {
             resolveInfo = args.getString("resolve")
         )
         _currentLocalTitle.value = args.getString("localTitle")
+        args.getString("mode")?.let { if (it.isNotEmpty()) _playMode.value = it }
     }
 
     suspend fun release() {
