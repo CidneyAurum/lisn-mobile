@@ -1,7 +1,11 @@
 package com.glass.lisn.data
 
+import android.Manifest
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ContentValues
 import android.content.Context
+import android.content.pm.PackageManager
 import android.os.Build
 import android.provider.MediaStore
 import com.glass.lisn.engine.ResolveResult
@@ -19,6 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import androidx.core.app.NotificationCompat
 import okhttp3.Request
 import java.io.File
 
@@ -30,6 +35,29 @@ class DownloadManager(private val context: Context, private val registry: () -> 
     val queue: StateFlow<List<DownloadItem>> = _queue
     private val jobs = mutableMapOf<String, Job>()
     private val songsById = mutableMapOf<String, Song>()
+
+    private fun ensureChannel(nm: NotificationManager) {
+        if (Build.VERSION.SDK_INT >= 26) {
+            nm.createNotificationChannel(
+                NotificationChannel("download", "下载", NotificationManager.IMPORTANCE_DEFAULT)
+            )
+        }
+    }
+
+    private fun notifyDone(item: DownloadItem, ok: Boolean, detail: String) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) return
+        val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        ensureChannel(nm)
+        val title = if (ok) "下载完成" else "下载失败"
+        val text = "${item.artist} - ${item.name} · ${item.quality.uppercase()}" + (if (!ok) " ($detail)" else "")
+        val n = NotificationCompat.Builder(context, "download")
+            .setSmallIcon(if (ok) android.R.drawable.stat_sys_download_done else android.R.drawable.stat_notify_error)
+            .setContentTitle(title).setContentText(text)
+            .setAutoCancel(true).build()
+        runCatching { nm.notify(item.id.hashCode(), n) }
+    }
 
     private fun patch(id: String, transform: (DownloadItem) -> DownloadItem) {
         _queue.value = _queue.value.map { if (it.id == id) transform(it) else it }
@@ -67,10 +95,12 @@ class DownloadManager(private val context: Context, private val registry: () -> 
                 }
             }
             patch(id) { it.copy(status = DownloadStatus.COMPLETED, progress = 1f, filePath = saved) }
+            notifyDone(_queue.value.find { it.id == id } ?: DownloadItem(id = id, name = song.name, artist = song.artist, quality = quality), true, "")
         } catch (e: kotlinx.coroutines.CancellationException) {
             patch(id) { it.copy(status = DownloadStatus.CANCELLED) }
         } catch (e: Throwable) {
             patch(id) { it.copy(status = DownloadStatus.FAILED, error = e.message ?: e.toString()) }
+            notifyDone(_queue.value.find { it.id == id } ?: DownloadItem(id = id, name = song.name, artist = song.artist, quality = quality), false, e.message ?: e.toString())
         } finally {
             jobs.remove(id)
         }
