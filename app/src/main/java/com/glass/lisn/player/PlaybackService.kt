@@ -33,6 +33,8 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
+import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.json.Json
@@ -84,6 +86,17 @@ class PlaybackService : MediaSessionService() {
             .build()
         p.addListener(playerListener)
         applyRepeatMode(p)
+
+        // 桌面歌词:进度循环(300ms 级推送,视图内部插值平滑)
+        scope.launch(Dispatchers.Main) {
+            while (coroutineContext.isActive) {
+                val pl = player
+                if (pl != null && com.glass.lisn.ui.overlay.DesktopLyricsOverlay.isRunning) {
+                    com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onPos(pl.currentPosition.coerceAtLeast(0), pl.isPlaying)
+                }
+                delay(300)
+            }
+        }
 
         val prevButton = CommandButton.Builder()
             .setSessionCommand(SessionCommand(SessionCommands.PREV, Bundle.EMPTY))
@@ -256,6 +269,9 @@ class PlaybackService : MediaSessionService() {
 
     private fun playLocal(uri: String, title: String, artist: String) {
         val p = player ?: return
+        com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onSongChanged(
+            Song(key = "local:$uri", name = title, artist = artist)
+        )
         scope.launch {
             withContext(Dispatchers.Main) {
                 p.setMediaItem(
@@ -301,6 +317,7 @@ class PlaybackService : MediaSessionService() {
                 }
                 consecutiveFails = 0
                 persistQueue()
+                com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onSongChanged(song)
                 broadcast(loading = false, resolve = "${res.providerId}/${res.platform}/${res.quality}")
                 persistQueue()
             } catch (e: kotlinx.coroutines.CancellationException) {

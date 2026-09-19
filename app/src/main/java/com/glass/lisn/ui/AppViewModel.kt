@@ -71,6 +71,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             }
         }
         player.connect()
+        // 桌面歌词:上次开启且已有悬浮窗权限则自动恢复
+        val s0 = EngineHub.settings.get()
+        if (s0.desktopLyrics && com.glass.lisn.ui.overlay.DesktopLyricsOverlay.canOverlay(getApplication())) {
+            com.glass.lisn.ui.overlay.DesktopLyricsOverlay.start(getApplication())
+        }
         refreshSources()
         refreshPlaylists()
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {

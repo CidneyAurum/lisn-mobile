@@ -181,16 +181,58 @@ class SourceRegistry(context: Context) {
         return null
     }
 
+    /** 至少两条带时间戳的行,否则视为占位/空歌词 */
+    private fun lyricHasTimeline(raw: String): Boolean {
+        val ts = Regex("' + bs + bs + '[1-9][0-9]{1,2}:[0-9]{1,2}")
+        var n = 0
+        for (line in raw.lineSequence()) {
+            if (ts.containsMatchIn(line)) { n++; if (n >= 2) return true }
+        }
+        return false
+    }
+
+    /** 歌词质量门:歌名非现场版但歌词首行标注 现场/Live → 视为错版,换源 */
+    private fun lyricMatchesSong(raw: String, song: Song): Boolean {
+        val n = song.name
+        if (n.contains("现场") || n.contains("Live", true) || n.contains("演唱会")) return true
+        val head = raw.lineSequence().take(6).joinToString("\n")
+        return !(head.contains("现场") || head.contains("演唱会") ||
+            Regex("\\bLive\\b", RegexOption.IGNORE_CASE).containsMatchIn(head))
+    }
+
     suspend fun getLyric(song: Song): String? {
+        // 同一平台的所有 provider 依次尝试(lx 源多无歌词能力,须轮到 GD/HTTP 等)
         for (o in song.origins) {
-            val p = providers.find {
-                it.health.status != "disabled" && it.caps.platforms.contains(o.platform)
-            } ?: continue
-            try {
-                val lrc = withTimeoutMs(8000) { p.getLyric(o) }
-                if (!lrc.isNullOrEmpty()) return lrc
-            } catch (_: Throwable) { /* next */ }
+            for (p in providers) {
+                if (p.health.status == "disabled") continue
+                if (!p.caps.platforms.contains(o.platform)) continue
+                try {
+                    val lrc = withTimeoutMs(8000) { p.getLyric(o) }
+                    android.util.Log.i("LisnLyric", "provider=${p.id} platform=${o.platform} len=${lrc?.length ?: -1}")
+                    if (!lrc.isNullOrEmpty() && lyricMatchesSong(lrc, song) && lyricHasTimeline(lrc)) return lrc
+                } catch (e: Throwable) {
+                    android.util.Log.w("LisnLyric", "provider=${p.id} platform=${o.platform} fail: ${e.message}")
+                }
+            }
+        }
+        // 跨平台兜底:播放平台无歌词能力(tx 等)时,按「歌名+歌手」在 GD 搜同名曲取词
+        try {
+            val lrc = withTimeoutMs(12000) { gdLyricFallback(song) }
+            android.util.Log.i("LisnLyric", "gdFallback len=" + (lrc?.length ?: -1))
+            if (!lrc.isNullOrEmpty()) return lrc
+        } catch (e: Throwable) {
+            android.util.Log.w("LisnLyric", "gdFallback fail: " + e.message)
         }
         return null
+    }
+
+    private suspend fun gdLyricFallback(song: Song): String? {
+        val gd = providers.firstOrNull { it.id == "gd" } ?: return null
+        val hits = gd.search(song.name.trim() + " " + song.artist.trim(), 1)
+        val hit = hits.firstOrNull { h -> h.name.contains(song.name.trim()) } ?: return null
+        val o = hit.origins.firstOrNull() ?: return null
+        val lrc = gd.getLyric(o)
+        if (lrc.isNullOrEmpty() || !lyricMatchesSong(lrc, song) || !lyricHasTimeline(lrc)) return null
+        return lrc
     }
 }

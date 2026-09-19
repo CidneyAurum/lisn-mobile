@@ -123,7 +123,8 @@ data class Settings(
     val mode: String = "auto",
     val intervalMs: Long = 2500,
     val autoCheckUpdates: Boolean = true,
-    val playMode: String = "loop"
+    val playMode: String = "loop",
+    val desktopLyrics: Boolean = false
 )
 
 @Serializable

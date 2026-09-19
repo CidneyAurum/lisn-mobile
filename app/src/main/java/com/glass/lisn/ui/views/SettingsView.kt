@@ -107,6 +107,44 @@ fun SettingsView(vm: AppViewModel) {
             }
         }
 
+        // 桌面歌词
+        val ctx = androidx.compose.ui.platform.LocalContext.current
+        SectionCard(
+            title = "桌面歌词",
+            desc = "在其他应用上层显示 Limbus 风格歌词(逐字显现/飘散消逝),全穿透不遮挡触控"
+        ) {
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    if (s.desktopLyrics) "已开启" else "已关闭",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (s.desktopLyrics) MaterialTheme.colorScheme.primary else Text2,
+                    modifier = Modifier.weight(1f)
+                )
+                Switch(
+                    checked = s.desktopLyrics,
+                    onCheckedChange = { v ->
+                        if (v && !com.glass.lisn.ui.overlay.DesktopLyricsOverlay.canOverlay(ctx)) {
+                            vm.toast = "请先在系统设置中允许「显示在其他应用上层」,再回来开启"
+                            ctx.startActivity(
+                                android.content.Intent(
+                                    android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    android.net.Uri.parse("package:" + ctx.packageName)
+                                ).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        } else {
+                            vm.patchSettings(s.copy(desktopLyrics = v))
+                            if (v) com.glass.lisn.ui.overlay.DesktopLyricsOverlay.start(ctx)
+                            else com.glass.lisn.ui.overlay.DesktopLyricsOverlay.stop()
+                        }
+                    },
+                    colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
+                )
+            }
+        }
+
         // 更新
         SectionCard(title = "自动检查音源更新", desc = "启动时查询 keep-alive 仓库的插件脚本更新") {
             Switch(
