@@ -22,6 +22,7 @@ import com.glass.lisn.EngineHub
 import com.glass.lisn.engine.UA
 import com.glass.lisn.engine.json
 import com.glass.lisn.model.Song
+import java.io.File
 import com.google.common.collect.ImmutableList
 import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
@@ -34,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import kotlin.random.Random
 
 /**
@@ -61,6 +63,7 @@ class PlaybackService : MediaSessionService() {
         super.onCreate()
         quality = EngineHub.settings.get().quality
         playMode = EngineHub.settings.get().playMode
+        restoreQueue()
 
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(UA)
@@ -103,6 +106,38 @@ class PlaybackService : MediaSessionService() {
             .setCallback(sessionCallback)
             .setCustomLayout(ImmutableList.of(prevButton, nextButton))
             .build()
+    }
+
+    private fun queueFile(): File = File(filesDir, "last-queue.json")
+
+    /** 应用重启后恢复上次队列(不自动播放,等用户点播放) */
+    private fun restoreQueue() {
+        runCatching {
+            val f = queueFile()
+            if (!f.exists()) return
+            val obj = json.parseToJsonElement(f.readText()).let { com.glass.lisn.engine.jsonToJsonNative(it) } as? Map<*, *> ?: return
+            val q = obj["queue"] as? List<*> ?: return
+            queue = q.mapNotNull { item ->
+                (item as? Map<*, *>)?.let { m ->
+                    runCatching { json.decodeFromString(Song.serializer(), Json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), com.glass.lisn.engine.anyToJsonElement(m))) }.getOrNull()
+                }
+            }
+            queueIdx = (obj["index"] as? Double)?.toInt() ?: -1
+            if (queueIdx >= queue.size) queueIdx = queue.size - 1
+            android.util.Log.i("LisnPlayback", "恢复队列: ${queue.size} 首, idx=$queueIdx")
+        }
+    }
+
+    private fun persistQueue() {
+        runCatching {
+            queueFile().writeText(json.encodeToString(
+                kotlinx.serialization.json.JsonElement.serializer(),
+                com.glass.lisn.engine.anyToJsonElement(mapOf(
+                    "queue" to json.encodeToString(ListSerializer(Song.serializer()), queue),
+                    "index" to queueIdx
+                ))
+            ))
+        }
     }
 
     private fun applyRepeatMode(p: ExoPlayer) {
@@ -245,6 +280,7 @@ class PlaybackService : MediaSessionService() {
                     p.play()
                 }
                 consecutiveFails = 0
+                persistQueue()
                 broadcast(loading = false, resolve = "${res.providerId}/${res.platform}/${res.quality}")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e

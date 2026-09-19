@@ -85,7 +85,16 @@ fun PlayerDock(vm: AppViewModel) {
             if (playback.error != null) {
                 Icon(Icons.Filled.Error, null, tint = MaterialTheme.colorScheme.error, modifier = Modifier.size(18.dp))
             }
-            IconButton(onClick = { vm.player.toggle() }, enabled = !buffering) {
+            IconButton(onClick = {
+                // 进程重启后播放器为空:有队列记忆时点播放 = 重播当前曲
+                if (!isPlaying && !buffering && song != null &&
+                    (vm.player.durationMs.value <= 0L) && playback.queue.isNotEmpty()
+                ) {
+                    vm.player.play(song, playback.queue, playback.queueIdx)
+                } else {
+                    vm.player.toggle()
+                }
+            }, enabled = !buffering) {
                 if (buffering) {
                     androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else if (isPlaying) {
