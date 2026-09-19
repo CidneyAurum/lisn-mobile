@@ -2,6 +2,7 @@ package com.glass.lisn
 
 import android.app.Application
 import com.glass.lisn.data.DownloadManager
+import com.glass.lisn.data.SearchHistoryStore
 import com.glass.lisn.data.PlaylistStore
 import com.glass.lisn.data.SettingsStore
 import com.glass.lisn.engine.HttpSourceConfig
@@ -18,6 +19,8 @@ object EngineHub {
     lateinit var playlists: PlaylistStore
         private set
     lateinit var downloads: DownloadManager
+        private set
+    lateinit var searchHistory: SearchHistoryStore
         private set
 
     private val templatesFile by lazy { java.io.File(registryDir(), "http-templates.json") }
@@ -65,6 +68,7 @@ object EngineHub {
         registry.mf.init()
         registry.mode = settings.get().mode
         downloads = DownloadManager(app) { registry }
+        searchHistory = SearchHistoryStore(app)
         rebuild()
     }
 }

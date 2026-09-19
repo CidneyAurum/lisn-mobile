@@ -53,6 +53,7 @@ import com.glass.lisn.ui.theme.Aurora1
 import com.glass.lisn.ui.theme.Aurora2
 import com.glass.lisn.ui.theme.Aurora3
 import com.glass.lisn.ui.theme.Text2
+import com.glass.lisn.ui.theme.Text3
 import kotlinx.coroutines.launch
 
 private val HOT_CHIPS = listOf("晴天", "海阔天空", "突然好想你", "漠河舞厅", "孤勇者", "起风了")
@@ -141,6 +142,43 @@ fun DiscoverView(vm: AppViewModel) {
                 }
             }
         }
+        // 最近搜索
+        if (vm.searchHistory.isNotEmpty()) {
+            item {
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("最近搜索", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+                    Text(
+                        "清空",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Text3,
+                        modifier = Modifier.clickable { vm.clearSearchHistory() }.padding(6.dp)
+                    )
+                }
+            }
+            item {
+                LazyRow(
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(vm.searchHistory.take(10).size) { i ->
+                        val kw = vm.searchHistory[i]
+                        Box(
+                            Modifier
+                                .clip(RoundedCornerShape(20.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .clickable { vm.view = View.SEARCH; vm.doSearch(kw) }
+                                .padding(horizontal = 14.dp, vertical = 8.dp)
+                        ) {
+                            Text(kw, style = MaterialTheme.typography.bodyMedium, color = Text2)
+                        }
+                    }
+                }
+            }
+        }
+
         // 每日推荐
         item {
             Row(

@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
@@ -88,6 +89,10 @@ fun LisnRoot() {
     val vm: AppViewModel = viewModel()
     val snackbar = remember { SnackbarHostState() }
     val nowPlayingOpen = vm.nowPlayingOpen
+
+    // 移动端返回键:全屏播放页 > 次级视图 > 发现页(不退出应用)
+    BackHandler(enabled = nowPlayingOpen) { vm.nowPlayingOpen = false }
+    BackHandler(enabled = !nowPlayingOpen && vm.view != View.DISCOVER) { vm.view = View.DISCOVER }
 
     LaunchedEffect(Unit) {
         vm.player.connect()

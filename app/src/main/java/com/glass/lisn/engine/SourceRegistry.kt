@@ -96,7 +96,12 @@ class SourceRegistry(context: Context) {
     private suspend fun tryProvider(
         p: SourceProvider, song: Song, chain: List<String>
     ): ResolveResult? {
-        val origins = song.origins.filter { o -> p.caps.platforms.contains(o.platform) }
+        // 插件类源(需要自家 musicItem 数据)只解析自有 origin;
+        // GD/HTTP 模板类按 platform+songId 通用解析,可跨 provider 复用 origin
+        val isPlugin = p.kind == "musicfree-plugin"
+        val origins = song.origins.filter { o ->
+            p.caps.platforms.contains(o.platform) && (!isPlugin || o.providerId == p.id)
+        }
         if (origins.isEmpty()) return null
         for (q in chain) {
             if (!p.caps.qualities.contains(q)) continue

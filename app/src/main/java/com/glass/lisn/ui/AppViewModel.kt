@@ -54,6 +54,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var settings by mutableStateOf(EngineHub.settings.get())
     var playlists by mutableStateOf<List<UserPlaylist>>(emptyList())
     var library by mutableStateOf<List<LibraryFile>>(emptyList())
+    var searchHistory by mutableStateOf(EngineHub.searchHistory.items)
     /** 下载队列流(UI 用 collectAsState 订阅) */
     val downloads get() = EngineHub.downloads.queue
 
@@ -89,6 +90,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         if (k.isEmpty() || searching) return
         searchJob?.cancel()
         keyword = k
+        EngineHub.searchHistory.record(k)
+        searchHistory = EngineHub.searchHistory.items
         searching = true
         searched = true
         searchError = null
@@ -302,6 +305,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun clearFinishedDownloads() = EngineHub.downloads.clearFinished()
 
     // ---------- 本地库 ----------
+
+    fun removeSearchHistory(kw: String) {
+        EngineHub.searchHistory.remove(kw)
+        searchHistory = EngineHub.searchHistory.items
+    }
+
+    fun clearSearchHistory() {
+        EngineHub.searchHistory.clear()
+        searchHistory = emptyList()
+    }
 
     fun refreshLibrary() {
         viewModelScope.launch {
