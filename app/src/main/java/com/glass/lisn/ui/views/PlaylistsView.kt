@@ -69,6 +69,11 @@ fun PlaylistsView(vm: AppViewModel) {
                     Icon(Icons.Filled.QueueMusic, null, tint = Text2, modifier = Modifier.size(48.dp))
                     Text("还没有歌单", style = MaterialTheme.typography.bodyMedium, color = Text2, modifier = Modifier.padding(top = 8.dp))
                     Text("搜索页可一键保存结果,或手动添加", style = MaterialTheme.typography.bodySmall, color = Text2)
+                    androidx.compose.material3.Button(
+                        onClick = { vm.view = com.glass.lisn.ui.View.SEARCH },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.padding(top = 12.dp)
+                    ) { Text("去搜索音乐") }
                 }
             }
         } else {

@@ -4,6 +4,7 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -78,7 +79,8 @@ fun PlayerDock(vm: AppViewModel) {
                 Text(
                     title,
                     style = MaterialTheme.typography.bodyMedium,
-                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                    maxLines = 1,
+                    modifier = Modifier.basicMarquee(iterations = Int.MAX_VALUE)
                 )
                 Text(sub, style = MaterialTheme.typography.bodySmall, color = Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
