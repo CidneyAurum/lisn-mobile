@@ -119,7 +119,7 @@ fun SettingsView(vm: AppViewModel) {
 
         // 关于
         SectionCard(title = "关于", desc = null) {
-            Text("聆 LISN Mobile v0.1.0", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
+            Text("聆 LISN Mobile v${com.glass.lisn.BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(top = 8.dp))
             Text(
                 "基于桌面端「聆 LISN」移植 · 聚合音源播放器\nGD音乐台 / MusicFree 插件 / HTTP 模板音源",
                 style = MaterialTheme.typography.bodySmall, color = Text2,
