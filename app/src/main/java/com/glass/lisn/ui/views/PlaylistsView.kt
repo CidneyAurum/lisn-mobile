@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.fillMaxSize
+import coil.compose.AsyncImage
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -95,7 +97,28 @@ fun PlaylistsView(vm: AppViewModel) {
                             .padding(14.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(Icons.Filled.QueueMusic, null, tint = MaterialTheme.colorScheme.primary)
+                        val covers = pl.songs.filter { !it.picUrl.isNullOrBlank() }
+                        if (covers.size >= 4) {
+                            // 2x2 封面拼图
+                            Column(
+                                Modifier
+                                    .size(46.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                            ) {
+                                Row(Modifier.weight(1f)) {
+                                    AsyncImage(covers[0].picUrl, null, Modifier.weight(1f).fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                                    AsyncImage(covers[1].picUrl, null, Modifier.weight(1f).fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                                }
+                                Row(Modifier.weight(1f)) {
+                                    AsyncImage(covers[2].picUrl, null, Modifier.weight(1f).fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                                    AsyncImage(covers[3].picUrl, null, Modifier.weight(1f).fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                                }
+                            }
+                        } else if (covers.isNotEmpty()) {
+                            AsyncImage(covers[0].picUrl, null, Modifier.size(46.dp).clip(RoundedCornerShape(10.dp)), contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+                        } else {
+                            Icon(Icons.Filled.QueueMusic, null, tint = MaterialTheme.colorScheme.primary)
+                        }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Text(pl.name, style = MaterialTheme.typography.bodyMedium)
