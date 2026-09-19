@@ -57,6 +57,7 @@ private fun HealthDot(status: String) {
 fun SourcesView(vm: AppViewModel) {
     val sources = vm.sources
     var addHttp by remember { mutableStateOf(false) }
+    var addLx by remember { mutableStateOf(false) }
     var checking by remember { mutableStateOf(false) }
 
     if (sources == null) {
@@ -143,8 +144,18 @@ fun SourcesView(vm: AppViewModel) {
             }
             // lx 自定义源脚本
             item {
-                Text("lx 自定义源", style = MaterialTheme.typography.titleMedium, color = Text2,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
+                Row(
+                    Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("lx 自定义源", style = MaterialTheme.typography.titleMedium, color = Text2, modifier = Modifier.weight(1f))
+                    Text(
+                        "添加",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.clickable { addLx = true }.padding(6.dp)
+                    )
+                }
             }
             items(sources.lxEntries.size) { i ->
                 val e = sources.lxEntries[i]
@@ -268,6 +279,16 @@ fun SourcesView(vm: AppViewModel) {
         }
     }
 
+    if (addLx) {
+        AddLxDialog(
+            onDismiss = { addLx = false },
+            onConfirm = { name, url ->
+                vm.addLxScript(name, url) { msg -> vm.showToast(msg) }
+                addLx = false
+            }
+        )
+    }
+
     if (addHttp) {
         AddHttpDialog(
             onDismiss = { addHttp = false },
@@ -310,6 +331,43 @@ private fun AddHttpDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> 
                 onClick = { onConfirm(name, tpl) },
                 enabled = name.isNotBlank() && tpl.isNotBlank()
             ) { Text("添加", color = MaterialTheme.colorScheme.primary) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("取消", color = Text2) }
+        }
+    )
+}
+
+@Composable
+private fun AddLxDialog(onDismiss: () -> Unit, onConfirm: (String, String) -> Unit) {
+    var name by remember { mutableStateOf("") }
+    var url by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("添加 lx 自定义源", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "兼容 lx-music 自定义源脚本(将自动下载并沙箱加载)",
+                    style = MaterialTheme.typography.bodySmall, color = Text3
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = name, onValueChange = { name = it },
+                    placeholder = { Text("名称(可留空,自动读 @name)", color = Text2) },
+                    singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()
+                )
+                androidx.compose.material3.OutlinedTextField(
+                    value = url, onValueChange = { url = it },
+                    placeholder = { Text("脚本 URL(raw.githubusercontent/jsdelivr)", color = Text2) },
+                    singleLine = true, shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(onClick = { onConfirm(name, url) }, enabled = url.isNotBlank()) {
+                Text("添加", color = MaterialTheme.colorScheme.primary)
+            }
         },
         dismissButton = {
             androidx.compose.material3.TextButton(onClick = onDismiss) { Text("取消", color = Text2) }

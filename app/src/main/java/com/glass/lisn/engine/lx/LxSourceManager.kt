@@ -188,6 +188,30 @@ class LxSourceManager(context: Context) {
         }
     }
 
+    /** 添加自定义脚本源:下载 → 解析 @name/@version → 沙箱加载 → 入列表 */
+    suspend fun addCustom(name: String, url: String): Pair<Boolean, String> {
+        val id = "custom-" + System.currentTimeMillis().toString(36)
+        return try {
+            val code = withContext(Dispatchers.IO) {
+                com.glass.lisn.engine.httpGetText(url, headers = mapOf("User-Agent" to "LISN-Android/0.1"), timeoutMs = 16000)
+            }
+            if (code.length < 40) throw RuntimeException("脚本内容无效")
+            scriptFile(id).writeText(code)
+            val (metaName, metaVer) = parseMeta(code)
+            val host = LxScriptHost(id, metaName ?: name, metaVer)
+            host.run(code)
+            synchronized(hosts) { hosts[id] = host }
+            entries = entries + LxSourceEntry(
+                id = id, name = name.ifEmpty { metaName ?: "自定义源" }, rawUrl = url,
+                enabled = true, localVersion = metaVer
+            )
+            save()
+            true to "已添加并加载${metaVer?.let { " (v$it)" } ?: ""}"
+        } catch (e: Throwable) {
+            false to (e.message ?: e.toString())
+        }
+    }
+
     suspend fun checkUpdates() {
         for (entry in entries) {
             if (entry.repo.isNullOrEmpty() || entry.file.isNullOrEmpty() || entry.branch.isNullOrEmpty()) continue

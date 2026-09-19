@@ -201,6 +201,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun addLxScript(name: String, url: String, onDone: (String) -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val (ok, detail) = EngineHub.registry.lx.addCustom(name, url)
+            EngineHub.rebuild()
+            refreshSources()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onDone(detail) }
+        }
+    }
+
     fun upgradeLx(id: String, onDone: (Boolean, String) -> Unit) {
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             val (ok, detail) = EngineHub.registry.lx.upgrade(id)
