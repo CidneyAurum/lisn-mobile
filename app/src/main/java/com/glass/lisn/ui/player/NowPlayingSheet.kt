@@ -93,8 +93,6 @@ fun NowPlayingSheet(vm: AppViewModel) {
     val playback by vm.player.playback.collectAsState()
     val isPlaying by vm.player.isPlaying.collectAsState()
     val buffering by vm.player.isBuffering.collectAsState()
-    val positionMs by vm.player.positionMs.collectAsState()
-    val durationMs by vm.player.durationMs.collectAsState()
     val localTitle by vm.player.currentLocalTitle.collectAsState()
     val playMode by vm.player.playMode.collectAsState()
 
@@ -120,15 +118,6 @@ fun NowPlayingSheet(vm: AppViewModel) {
         }
     }
 
-    val currentLine = remember(lrc, positionMs) {
-        if (lrc.isEmpty()) -1 else (lrc.indexOfLast { it.timeMs <= positionMs + 300 }.takeIf { it >= 0 } ?: -1)
-    }
-    val listState = rememberLazyListState()
-    LaunchedEffect(currentLine, centerTab) {
-        if (centerTab == "lyric" && currentLine >= 0) {
-            runCatching { listState.animateScrollToItem(maxOf(0, currentLine - 4)) }
-        }
-    }
 
     Column(
         Modifier
@@ -167,31 +156,7 @@ fun NowPlayingSheet(vm: AppViewModel) {
         // 中部:封面 / 歌词 / 队列
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             when (centerTab) {
-                "lyric" -> {
-                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (lrc.isEmpty()) {
-                            item {
-                                Text("暂无歌词", style = MaterialTheme.typography.bodyMedium, color = Text3,
-                                    modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp), textAlign = TextAlign.Center)
-                            }
-                        } else {
-                            items(lrc.size) { i ->
-                                val line = lrc[i]
-                                val active = i == currentLine
-                                Text(
-                                    line.text.ifEmpty { "···" },
-                                    fontSize = if (active) 17.sp else 14.sp,
-                                    color = if (active) MaterialTheme.colorScheme.primary else Text2,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable { vm.player.seekTo(line.timeMs) }
-                                        .padding(vertical = 8.dp, horizontal = 8.dp)
-                                )
-                            }
-                        }
-                    }
-                }
+                "lyric" -> LyricSection(vm, lrc)
                 "queue" -> {
                     LazyColumn(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (playback.queue.isEmpty()) {
@@ -276,22 +241,8 @@ fun NowPlayingSheet(vm: AppViewModel) {
             )
         }
 
-        // 进度条
-        Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
-            Slider(
-                value = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
-                onValueChange = { if (durationMs > 0) vm.player.seekTo((it * durationMs).toLong()) },
-                colors = SliderDefaults.colors(
-                    thumbColor = MaterialTheme.colorScheme.primary,
-                    activeTrackColor = MaterialTheme.colorScheme.primary,
-                    inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
-                )
-            )
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text(formatMs(positionMs), style = MaterialTheme.typography.labelSmall, color = Text3)
-                Text(formatMs(durationMs), style = MaterialTheme.typography.labelSmall, color = Text3)
-            }
-        }
+        // 进度条(高频状态下放到子组件,避免整页高频重组)
+        ProgressSection(vm)
 
         // 控制区
         Row(
@@ -350,7 +301,7 @@ fun NowPlayingSheet(vm: AppViewModel) {
         SleepTimerDialog(onDismiss = { showSleepDialog = false }, onPick = { vm.player.setSleepTimer(it) })
     }
 
-    song?.let { target ->
+    if (showAddDialog) song?.let { target ->
         com.glass.lisn.ui.views.dialogs.AddToPlaylistDialog(
             playlists = vm.playlists,
             songName = target.name,
@@ -403,4 +354,62 @@ private fun SleepTimerDialog(onDismiss: () -> Unit, onPick: (Int) -> Unit) {
             androidx.compose.material3.TextButton(onClick = onDismiss) { Text("关闭", color = Text2) }
         }
     )
+}
+
+/** 进度条子组件:position/duration 高频状态只重组此区块 */
+@Composable
+private fun ProgressSection(vm: AppViewModel) {
+    val positionMs by vm.player.positionMs.collectAsState()
+    val durationMs by vm.player.durationMs.collectAsState()
+    Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
+        Slider(
+            value = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
+            onValueChange = { if (durationMs > 0) vm.player.seekTo((it * durationMs).toLong()) },
+            colors = SliderDefaults.colors(
+                thumbColor = MaterialTheme.colorScheme.primary,
+                activeTrackColor = MaterialTheme.colorScheme.primary,
+                inactiveTrackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        )
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(formatMs(positionMs), style = MaterialTheme.typography.labelSmall, color = Text3)
+            Text(formatMs(durationMs), style = MaterialTheme.typography.labelSmall, color = Text3)
+        }
+    }
+}
+
+/** 歌词子组件:滚动同步的高频状态只重组此区块 */
+@Composable
+private fun LyricSection(vm: AppViewModel, lrc: List<LrcLine>) {
+    val positionMs by vm.player.positionMs.collectAsState()
+    val currentLine = remember(lrc, positionMs) {
+        if (lrc.isEmpty()) -1 else (lrc.indexOfLast { it.timeMs <= positionMs + 300 }.takeIf { it >= 0 } ?: -1)
+    }
+    val listState = rememberLazyListState()
+    LaunchedEffect(currentLine) {
+        if (currentLine >= 0) runCatching { listState.animateScrollToItem(maxOf(0, currentLine - 4)) }
+    }
+    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+        if (lrc.isEmpty()) {
+            item {
+                Text("暂无歌词", style = MaterialTheme.typography.bodyMedium, color = Text3,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 40.dp), textAlign = TextAlign.Center)
+            }
+        } else {
+            items(lrc.size) { i ->
+                val line = lrc[i]
+                val active = i == currentLine
+                Text(
+                    line.text.ifEmpty { "···" },
+                    fontSize = if (active) 17.sp else 14.sp,
+                    color = if (active) MaterialTheme.colorScheme.primary else Text2,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { vm.player.seekTo(line.timeMs) }
+                        .padding(vertical = 8.dp, horizontal = 8.dp)
+                )
+            }
+        }
+    }
 }
