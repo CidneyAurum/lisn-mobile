@@ -175,6 +175,12 @@ fun NowPlayingSheet(vm: AppViewModel) {
                         .background(Color(0xD90D1017))
                         .padding(horizontal = 8.dp)
                 ) {
+                    val queueListState = rememberLazyListState()
+                    LaunchedEffect(playback.queueIdx, centerTab) {
+                        if (centerTab == "queue" && playback.queueIdx >= 0) {
+                            runCatching { queueListState.animateScrollToItem(maxOf(0, playback.queueIdx - 2)) }
+                        }
+                    }
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             "清空队列(" + playback.queue.size + ")",
@@ -185,7 +191,7 @@ fun NowPlayingSheet(vm: AppViewModel) {
                                 .padding(horizontal = 8.dp, vertical = 6.dp)
                         )
                     }
-                    LazyColumn(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                    LazyColumn(state = queueListState, modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (playback.queue.isEmpty()) {
                             item {
                                 Text("队列是空的", style = MaterialTheme.typography.bodyMedium, color = Text3,
