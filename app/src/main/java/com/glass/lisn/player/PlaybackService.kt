@@ -266,10 +266,11 @@ class PlaybackService : MediaSessionService() {
         val p = player ?: return
         val song = queue.getOrNull(queueIdx) ?: return
         resolveJob?.cancel()
+        val q = EngineHub.settings.get().quality  // 实时读取:切音质后无需重启服务
         broadcast(loading = true)
         resolveJob = scope.launch {
             try {
-                val res = EngineHub.registry.resolveUrl(song, quality, pinnedProviderId)
+                val res = EngineHub.registry.resolveUrl(song, q, pinnedProviderId)
                 val item = MediaItem.Builder()
                     .setMediaId(song.key)
                     .setUri(res.url)
@@ -290,6 +291,7 @@ class PlaybackService : MediaSessionService() {
                 consecutiveFails = 0
                 persistQueue()
                 broadcast(loading = false, resolve = "${res.providerId}/${res.platform}/${res.quality}")
+                persistQueue()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {

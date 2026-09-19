@@ -231,6 +231,21 @@ fun NowPlayingSheet(vm: AppViewModel) {
 
         // 封面/歌词/队列 切换 + 解析信息
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+            val quality = vm.settings.quality
+            Text(
+                when (quality) { "flac" -> "SQ"; "128k" -> "128K"; else -> "320K" },
+                fontSize = 12.sp,
+                color = Aurora3,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable {
+                        val next = when (quality) { "128k" -> "320k"; "320k" -> "flac"; else -> "128k" }
+                        vm.patchSettings(vm.settings.copy(quality = next))
+                        vm.showToast("音质切换为 " + next.uppercase() + ",下一首生效")
+                    }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+            Spacer(Modifier.size(6.dp))
             listOf("cover" to "封面", "lyric" to "歌词", "queue" to "队列").forEach { (tab, label) ->
                 Text(
                     label,
