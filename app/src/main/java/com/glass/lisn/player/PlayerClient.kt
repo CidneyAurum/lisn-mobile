@@ -34,6 +34,7 @@ object SessionCommands {
     const val STATE = "glass.state"
     const val SET_PINNED = "glass.setPinned"
     const val SET_PLAY_MODE = "glass.setPlayMode"
+    const val CLEAR_QUEUE = "glass.clearQueue"
     const val SLEEP_TIMER = "glass.sleepTimer"
 }
 
