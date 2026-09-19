@@ -141,11 +141,51 @@ fun SourcesView(vm: AppViewModel) {
                     Text("测试", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
                 }
             }
-            // MusicFree 插件管理
+            // lx 自定义源脚本
             item {
-                Text("MusicFree 插件", style = MaterialTheme.typography.titleMedium, color = Text2,
+                Text("lx 自定义源", style = MaterialTheme.typography.titleMedium, color = Text2,
                     modifier = Modifier.padding(horizontal = 20.dp, vertical = 12.dp))
             }
+            items(sources.lxEntries.size) { i ->
+                val e = sources.lxEntries[i]
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(e.name, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            listOfNotNull(
+                                if (e.platforms.isNotEmpty()) e.platforms.joinToString("/").uppercase() else null,
+                                if (e.qualities.isNotEmpty()) e.qualities.joinToString("/") else null,
+                                e.remoteDate?.take(10)?.let { "更新 $it" } ?: "未加载"
+                            ).joinToString(" · ").ifEmpty { " " },
+                            style = MaterialTheme.typography.bodySmall, color = Text2
+                        )
+                    }
+                    if (e.enabled) {
+                        Text(
+                            "升级",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .clickable { vm.upgradeLx(e.id) { ok, detail -> vm.showToast(detail) } }
+                                .padding(8.dp)
+                        )
+                    }
+                    Switch(
+                        checked = e.enabled,
+                        onCheckedChange = { vm.setLxEnabled(e.id, it) },
+                        colors = SwitchDefaults.colors(checkedTrackColor = MaterialTheme.colorScheme.primary)
+                    )
+                }
+            }
+            // MusicFree 插件管理
             items(sources.mfEntries.size) { i ->
                 val e = sources.mfEntries[i]
                 Row(

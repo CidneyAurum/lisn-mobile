@@ -64,11 +64,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         refreshPlaylists()
         viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             EngineHub.registry.mf.loadAll()
+            EngineHub.registry.lx.loadAll()
             EngineHub.rebuild()
             refreshSources()
         }
         if (settings.autoCheckUpdates) viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
             runCatching { EngineHub.registry.mf.checkUpdates() }
+            runCatching { EngineHub.registry.lx.checkUpdates() }
             EngineHub.rebuild()
             refreshSources()
         }
@@ -176,6 +178,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             EngineHub.registry.mf.loadAll()
             EngineHub.rebuild()
             refreshSources()
+        }
+    }
+
+    fun setLxEnabled(id: String, enabled: Boolean) {
+        EngineHub.registry.lx.setEnabled(id, enabled)
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            if (enabled) EngineHub.registry.lx.loadAll()
+            EngineHub.rebuild()
+            refreshSources()
+        }
+    }
+
+    fun upgradeLx(id: String, onDone: (Boolean, String) -> Unit) {
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val (ok, detail) = EngineHub.registry.lx.upgrade(id)
+            EngineHub.rebuild()
+            refreshSources()
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) { onDone(ok, detail) }
         }
     }
 

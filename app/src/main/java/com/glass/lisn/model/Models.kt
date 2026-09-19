@@ -78,11 +78,22 @@ data class HttpTemplateSnap(
 )
 
 @Serializable
+data class LxEntrySnap(
+    val id: String,
+    val name: String,
+    val enabled: Boolean,
+    val platforms: List<String> = emptyList(),
+    val qualities: List<String> = emptyList(),
+    val remoteDate: String? = null
+)
+
+@Serializable
 data class SourcesSnapshot(
     val providers: List<ProviderSnapshot>,
     val mode: String,
     val mfEntries: List<MfEntrySnap>,
-    val templates: List<HttpTemplateSnap>
+    val templates: List<HttpTemplateSnap>,
+    val lxEntries: List<LxEntrySnap> = emptyList()
 )
 
 enum class DownloadStatus { WAITING, RESOLVING, DOWNLOADING, COMPLETED, FAILED, CANCELLED }

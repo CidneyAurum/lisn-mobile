@@ -66,6 +66,7 @@ object EngineHub {
         playlists = PlaylistStore(app)
         registry = SourceRegistry(app)
         registry.mf.init()
+        registry.lx.init()
         registry.mode = settings.get().mode
         downloads = DownloadManager(app) { registry }
         searchHistory = SearchHistoryStore(app)

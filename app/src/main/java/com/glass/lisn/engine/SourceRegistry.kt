@@ -16,6 +16,7 @@ import kotlinx.coroutines.sync.withLock
 class SourceRegistry(context: Context) {
 
     val gd = GdProvider()
+    val lx = com.glass.lisn.engine.lx.LxSourceManager(context)
     val mf = MusicFreeManager(context)
     var providers: List<SourceProvider> = emptyList()
         private set
@@ -35,6 +36,10 @@ class SourceRegistry(context: Context) {
     fun rebuild(templates: List<HttpSourceConfig>) {
         httpTemplates = templates
         val list = mutableListOf<SourceProvider>()
+        for (entry in lx.entries) {
+            if (!entry.enabled) continue
+            lx.providerFor(entry)?.let { list += it }
+        }
         for (entry in mf.entries) {
             if (!entry.enabled) continue
             mf.providerFor(entry)?.let { list += it }
@@ -47,6 +52,17 @@ class SourceRegistry(context: Context) {
     fun snapshot(): SourcesSnapshot = SourcesSnapshot(
         providers = providers.map { ProviderSnapshot(it.id, it.name, it.kind, it.caps, it.health) },
         mode = mode,
+        lxEntries = lx.entries.map { e ->
+            val host = lx.hostFor(e.id)
+            com.glass.lisn.model.LxEntrySnap(
+                id = e.id, name = e.name, enabled = e.enabled,
+                platforms = host?.sources?.keys?.toList() ?: emptyList(),
+                qualities = host?.sources?.values
+                    ?.flatMap { it["qualitys"] as? List<*> ?: emptyList() }
+                    ?.mapNotNull { com.glass.lisn.engine.str(it) }?.distinct() ?: emptyList(),
+                remoteDate = e.remoteDate
+            )
+        },
         mfEntries = mf.snapEntries(),
         templates = httpTemplates.map { HttpTemplateSnap(it.id, it.name, it.urlTemplate, it.enabled) }
     )
