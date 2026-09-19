@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -30,12 +32,14 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.glass.lisn.model.Song
@@ -50,6 +54,12 @@ fun SearchView(vm: AppViewModel) {
     var kw by remember { mutableStateOf(vm.keyword) }
     var addSong by remember { mutableStateOf<Song?>(null) }
     var saveDialog by remember { mutableStateOf(false) }
+    var srcFilter by remember { mutableStateOf("all") }
+    val platforms = remember(vm.results) {
+        vm.results.flatMap { r -> r.origins.map { o -> o.platform } }.distinct()
+    }
+    val filtered = if (srcFilter == "all") vm.results
+    else vm.results.filter { r -> r.origins.any { o -> o.platform == srcFilter } }
     val playback by vm.player.playback.collectAsState()
     val playingKey = playback.queue.getOrNull(playback.queueIdx)?.key
 
@@ -59,6 +69,7 @@ fun SearchView(vm: AppViewModel) {
             Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            LaunchedEffect(vm.searched, vm.keyword) { srcFilter = "all" }
             IconButton(onClick = { vm.view = com.glass.lisn.ui.View.DISCOVER }) {
                 Icon(Icons.AutoMirrored.Filled.ArrowBack, "返回", tint = Text2)
             }
@@ -92,7 +103,7 @@ fun SearchView(vm: AppViewModel) {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "「${vm.keyword}」共 ${vm.results.size} 首",
+                    "「${vm.keyword}」共 ${vm.results.size} 首" + if (srcFilter == "all") "" else " · 筛选后 ${filtered.size} 首",
                     style = MaterialTheme.typography.bodySmall,
                     color = Text2,
                     modifier = Modifier.weight(1f)
@@ -106,6 +117,33 @@ fun SearchView(vm: AppViewModel) {
                     Icon(Icons.Filled.Save, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("保存为歌单", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                }
+            }
+        }
+
+        // 平台筛选 chips
+        if (platforms.size > 1 && !vm.searching) {
+            LazyRow(
+                Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                val PLAT_LABEL = mapOf("all" to "全部", "wy" to "网易", "kw" to "酷我", "kg" to "酷狗", "tx" to "Q音", "mg" to "咪咕")
+                val tabs = listOf("all") + platforms
+                items(tabs.size) { i ->
+                    val pf = tabs[i]
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(18.dp))
+                            .background(if (srcFilter == pf) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { srcFilter = pf }
+                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                    ) {
+                        Text(
+                            PLAT_LABEL[pf] ?: pf,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (srcFilter == pf) MaterialTheme.colorScheme.onPrimary else Text2
+                        )
+                    }
                 }
             }
         }
@@ -147,8 +185,8 @@ fun SearchView(vm: AppViewModel) {
                     )
                 }
             }
-            items(vm.results.size) { i ->
-                val song = vm.results[i]
+            items(filtered.size) { i ->
+                val song = filtered[i]
                 SongRow(
                     song = song,
                     playing = song.key == playingKey,
