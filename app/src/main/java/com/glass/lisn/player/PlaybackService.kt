@@ -1,5 +1,6 @@
 package com.glass.lisn.player
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
 import androidx.core.net.toUri
@@ -92,7 +93,13 @@ class PlaybackService : MediaSessionService() {
             .setIconResId(R.drawable.ic_skip_next)
             .build()
 
+        val sessionActivity = PendingIntent.getActivity(
+            this, 0,
+            Intent(this, Class.forName("com.glass.lisn.MainActivity")),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
         mediaSession = MediaSession.Builder(this, p)
+            .setSessionActivity(sessionActivity)
             .setCallback(sessionCallback)
             .setCustomLayout(ImmutableList.of(prevButton, nextButton))
             .build()

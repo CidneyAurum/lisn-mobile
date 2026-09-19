@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bedtime
+import androidx.compose.material.icons.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -102,6 +103,7 @@ fun NowPlayingSheet(vm: AppViewModel) {
     val artist = song?.artist ?: "本地音乐"
 
     var showSleepDialog by remember { mutableStateOf(false) }
+    var showAddDialog by remember { mutableStateOf(false) }
     var lrc by remember(song?.key ?: localTitle) { mutableStateOf<List<LrcLine>>(emptyList()) }
     // 中部区域三态:封面 / 歌词 / 队列
     var centerTab by remember { mutableStateOf("cover") } // cover | lyric | queue
@@ -144,7 +146,9 @@ fun NowPlayingSheet(vm: AppViewModel) {
                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text(artist, style = MaterialTheme.typography.bodySmall, color = Text2, maxLines = 1)
             }
-            Spacer(Modifier.size(48.dp))
+            IconButton(onClick = { if (song != null) showAddDialog = true }) {
+                Icon(Icons.Filled.PlaylistAdd, "加入歌单", tint = Text2)
+            }
         }
 
         // 中部:封面 / 歌词 / 队列
@@ -331,6 +335,23 @@ fun NowPlayingSheet(vm: AppViewModel) {
 
     if (showSleepDialog) {
         SleepTimerDialog(onDismiss = { showSleepDialog = false }, onPick = { vm.player.setSleepTimer(it) })
+    }
+
+    song?.let { target ->
+        com.glass.lisn.ui.views.dialogs.AddToPlaylistDialog(
+            playlists = vm.playlists,
+            songName = target.name,
+            onDismiss = { showAddDialog = false },
+            onCreateNew = { name ->
+                val pl = vm.createPlaylistGet(name)
+                vm.addSongToPlaylist(pl.id, target)
+                showAddDialog = false
+            },
+            onPick = { pl ->
+                vm.addSongToPlaylist(pl.id, target)
+                showAddDialog = false
+            }
+        )
     }
 }
 
