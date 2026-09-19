@@ -11,6 +11,12 @@
 | 功能 | 状态 |
 | --- | --- |
 | 聚合搜索(GD音乐台 netease/kuwo + 4 个 MusicFree 插件 kw/kg/tx/wy) | ✅ 多源并发,name|artist 归一合并,翻页累计 |
+| **lx-music 自定义源**(v0.2.0 新增) | ✅ QuickJS 协议宿主:EVENT_NAMES/on/send/request/utils.crypto(AES/MD5/RSA)/zlib/Buffer 垫片;huibq/ikun/全豆要/六音,音源中心在线升级 |
+| **播放模式**(v0.2.0 新增) | ✅ 列表循环/单曲循环(ExoPlayer 无缝)/随机;通知栏·全屏页·设置页同步 |
+| **播放队列**(v0.2.0 新增) | ✅ 全屏播放页队列视图,点击即播,当前曲高亮 |
+| **解析韧性**(v0.2.0 新增) | ✅ 失败源 60s TTL 黑名单 + 失败自动顺序跳下一首(整队失败才停) |
+| **搜索历史**(v0.2.0 新增) | ✅ 本地持久化 30 条,发现页快速复搜/清空 |
+| **睡眠定时器**(v0.2.0 新增) | ✅ 15/30/60 分钟自动暂停 |
 | 多源解析(质量链 flac→320k→128k 降级 + 音源顺序竞速 / 手动锁定) | ✅ |
 | MusicFree 插件宿主(CommonJS + axios/he/crypto-js/cheerio/qs/big-integer/dayjs 垫片) | ✅ QuickJS 沙箱,脚本 keep-alive 仓库自动下载/缓存/升级 |
 | HTTP 模板音源(如 Huibq 后端) | ✅ 默认模板 + 应用内添加 |
