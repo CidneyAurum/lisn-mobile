@@ -300,6 +300,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return pl
     }
 
+    fun renamePlaylist(id: String, name: String) {
+        EngineHub.playlists.rename(id, name)
+        refreshPlaylists()
+    }
+
     fun deletePlaylist(id: String) {
         EngineHub.playlists.delete(id)
         refreshPlaylists()

@@ -41,14 +41,14 @@ class PlaylistStore(context: Context) {
     }
 
     @Synchronized
-    fun delete(id: String) = save(load().filter { it.id != id })
-
-    @Synchronized
     fun rename(id: String, name: String) {
         val list = load()
         val idx = list.indexOfFirst { it.id == id }
         if (idx >= 0) { list[idx] = list[idx].copy(name = name.trim().ifEmpty { list[idx].name }); save(list) }
     }
+
+    @Synchronized
+    fun delete(id: String) = save(load().filter { it.id != id })
 
     @Synchronized
     fun addSong(id: String, song: Song): Pair<Boolean, String> {

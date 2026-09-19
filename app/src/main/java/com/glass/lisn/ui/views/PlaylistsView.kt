@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.Icon
@@ -46,6 +47,7 @@ import com.glass.lisn.ui.views.dialogs.TextInputDialog
 fun PlaylistsView(vm: AppViewModel) {
     var openId by remember { mutableStateOf<String?>(null) }
     var createDialog by remember { mutableStateOf(false) }
+    var renameTarget by remember { mutableStateOf<String?>(null) }
 
     val open = openId?.let { id -> vm.playlists.find { it.id == id } }
     if (open != null) {
@@ -99,6 +101,9 @@ fun PlaylistsView(vm: AppViewModel) {
                                 style = MaterialTheme.typography.bodySmall, color = Text2
                             )
                         }
+                        IconButton(onClick = { renameTarget = pl.id }) {
+                            Icon(Icons.Filled.DriveFileRenameOutline, "重命名", tint = Text2)
+                        }
                         IconButton(onClick = { vm.deletePlaylist(pl.id) }) {
                             Icon(Icons.Filled.Delete, "删除", tint = Text2)
                         }
@@ -106,6 +111,17 @@ fun PlaylistsView(vm: AppViewModel) {
                 }
             }
         }
+    }
+
+    renameTarget?.let { rid ->
+        val pl = vm.playlists.find { it.id == rid }
+        TextInputDialog(
+            title = "重命名歌单",
+            hint = "新名称",
+            initial = pl?.name ?: "",
+            onDismiss = { renameTarget = null },
+            onConfirm = { name -> vm.renamePlaylist(rid, name); renameTarget = null }
+        )
     }
 
     if (createDialog) {
