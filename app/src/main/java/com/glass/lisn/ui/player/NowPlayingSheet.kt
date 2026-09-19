@@ -107,6 +107,11 @@ fun NowPlayingSheet(vm: AppViewModel) {
     var lrc by remember(song?.key ?: localTitle) { mutableStateOf<List<LrcLine>>(emptyList()) }
     // 中部区域三态:封面 / 歌词 / 队列
     var centerTab by remember { mutableStateOf("cover") } // cover | lyric | queue
+    // 切歌/自动跳曲时收起遗留对话框,避免标题错乱
+    LaunchedEffect(song?.key ?: localTitle) {
+        showSleepDialog = false
+        showAddDialog = false
+    }
     LaunchedEffect(song?.key ?: localTitle) {
         lrc = emptyList()
         val s = song ?: return@LaunchedEffect

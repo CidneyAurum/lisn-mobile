@@ -116,7 +116,15 @@ class PlaybackService : MediaSessionService() {
             val f = queueFile()
             if (!f.exists()) return
             val obj = json.parseToJsonElement(f.readText()).let { com.glass.lisn.engine.jsonToJsonNative(it) } as? Map<*, *> ?: return
-            val q = obj["queue"] as? List<*> ?: return
+            // persistQueue 写入的是字符串化 JSON,需二次解析
+            val qRaw = obj["queue"]
+            val q: List<*> = when (qRaw) {
+                is List<*> -> qRaw
+                is String -> runCatching {
+                    com.glass.lisn.engine.jsonToJsonNative(json.parseToJsonElement(qRaw)) as? List<*>
+                }.getOrNull() ?: return
+                else -> return
+            }
             queue = q.mapNotNull { item ->
                 (item as? Map<*, *>)?.let { m ->
                     runCatching { json.decodeFromString(Song.serializer(), Json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), com.glass.lisn.engine.anyToJsonElement(m))) }.getOrNull()
