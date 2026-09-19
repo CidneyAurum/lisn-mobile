@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.Icon
@@ -140,6 +142,8 @@ private fun PlaylistDetailView(vm: AppViewModel, playlist: com.glass.lisn.model.
     val playback by vm.player.playback.collectAsState()
     val playingKey = playback.queue.getOrNull(playback.queueIdx)?.key
 
+    var showImport by remember { mutableStateOf(false) }
+    val context = androidx.compose.ui.platform.LocalContext.current
     Column(Modifier.fillMaxSize()) {
         Row(
             Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 10.dp),
@@ -151,6 +155,21 @@ private fun PlaylistDetailView(vm: AppViewModel, playlist: com.glass.lisn.model.
                 Text("${playlist.songs.size} 首", style = MaterialTheme.typography.bodySmall, color = Text2)
             }
             Row {
+                IconButton(
+                    onClick = {
+                        vm.exportPlaylistJson(playlist.id)?.let { jsonText ->
+                            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                            cm.setPrimaryClip(android.content.ClipData.newPlainText("LISN 歌单", jsonText))
+                            vm.showToast("歌单 JSON 已复制到剪贴板(${playlist.songs.size} 首)")
+                        } ?: vm.showToast("导出失败")
+                    },
+                    enabled = playlist.songs.isNotEmpty()
+                ) {
+                    Icon(Icons.Filled.FileUpload, "导出歌单 JSON", tint = Text2)
+                }
+                IconButton(onClick = { showImport = true }, enabled = playlist.songs.isNotEmpty() || true) {
+                    Icon(Icons.Filled.FileDownload, "导入歌单 JSON", tint = Text2)
+                }
                 IconButton(
                     onClick = {
                         // 对齐桌面端:节流保护,批量下载前 5 首
@@ -190,4 +209,31 @@ private fun PlaylistDetailView(vm: AppViewModel, playlist: com.glass.lisn.model.
             }
         }
     }
+}
+
+@Composable
+private fun ImportPlaylistDialog(vm: com.glass.lisn.ui.AppViewModel, onDismiss: () -> Unit) {
+    var text by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("导入歌单 JSON", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            androidx.compose.material3.OutlinedTextField(
+                value = text, onValueChange = { text = it },
+                placeholder = { Text("粘贴歌单 JSON 文本…", color = Text2) },
+                minLines = 4, maxLines = 8,
+                shape = RoundedCornerShape(12.dp), modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            androidx.compose.material3.TextButton(
+                onClick = { vm.importPlaylistJson(text); onDismiss() },
+                enabled = text.isNotBlank()
+            ) { Text("导入", color = MaterialTheme.colorScheme.primary) }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("取消", color = Text2) }
+        }
+    )
 }

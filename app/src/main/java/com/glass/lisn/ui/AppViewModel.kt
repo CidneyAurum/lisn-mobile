@@ -309,6 +309,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return pl
     }
 
+    fun exportPlaylistJson(id: String): String? = EngineHub.playlists.exportJson(id)
+
+    fun importPlaylistJson(text: String) {
+        val (ok, detail) = EngineHub.playlists.importJson(text)
+        refreshPlaylists()
+        showToast(detail)
+    }
+
     fun renamePlaylist(id: String, name: String) {
         EngineHub.playlists.rename(id, name)
         refreshPlaylists()

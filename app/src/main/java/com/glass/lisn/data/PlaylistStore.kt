@@ -40,6 +40,32 @@ class PlaylistStore(context: Context) {
         return pl
     }
 
+    /** 导出歌单为 JSON 文本(跨端迁移) */
+    @Synchronized
+    fun exportJson(id: String): String? {
+        val pl = load().find { it.id == id } ?: return null
+        return json.encodeToString(UserPlaylist.serializer(), pl)
+    }
+
+    /** 从 JSON 文本导入歌单(新建,歌名冲突自动加后缀) */
+    @Synchronized
+    fun importJson(text: String): Pair<Boolean, String> {
+        return try {
+            val pl = json.decodeFromString(UserPlaylist.serializer(), text.trim())
+            val list = load()
+            var name = pl.name.ifEmpty { "导入的歌单" }
+            var n = 2
+            while (list.any { it.name == name }) { name = "$name (${n++})" }
+            val imported = pl.copy(id = "pl-" + java.lang.Long.toString(System.currentTimeMillis(), 36) + "-" +
+                java.lang.Long.toString((0..46655).random().toLong(), 36), name = name, createdAt = System.currentTimeMillis())
+            list.add(0, imported)
+            save(list)
+            true to "已导入「$name」(${imported.songs.size} 首)"
+        } catch (e: Throwable) {
+            false to "导入失败:${e.message ?: e.toString()}"
+        }
+    }
+
     @Synchronized
     fun rename(id: String, name: String) {
         val list = load()
