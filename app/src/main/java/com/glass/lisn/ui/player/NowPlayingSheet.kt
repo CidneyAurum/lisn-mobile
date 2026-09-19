@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bedtime
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -100,6 +101,7 @@ fun NowPlayingSheet(vm: AppViewModel) {
     val title = song?.name ?: (localTitle ?: "未在播放")
     val artist = song?.artist ?: "本地音乐"
 
+    var showSleepDialog by remember { mutableStateOf(false) }
     var lrc by remember(song?.key ?: localTitle) { mutableStateOf<List<LrcLine>>(emptyList()) }
     // 中部区域三态:封面 / 歌词 / 队列
     var centerTab by remember { mutableStateOf("cover") } // cover | lyric | queue
@@ -131,6 +133,9 @@ fun NowPlayingSheet(vm: AppViewModel) {
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.nowPlayingOpen = false }) {
                 Icon(Icons.Filled.ExpandMore, "收起", tint = Text2)
+            }
+            IconButton(onClick = { showSleepDialog = true }) {
+                Icon(Icons.Filled.Bedtime, "睡眠定时", tint = Text2)
             }
             Column(
                 Modifier.weight(1f),
@@ -323,10 +328,45 @@ fun NowPlayingSheet(vm: AppViewModel) {
             }
         }
     }
+
+    if (showSleepDialog) {
+        SleepTimerDialog(onDismiss = { showSleepDialog = false }, onPick = { vm.player.setSleepTimer(it) })
+    }
 }
 
 private fun formatMs(ms: Long): String {
     if (ms <= 0) return "0:00"
     val total = ms / 1000
     return "${total / 60}:${(total % 60).toString().padStart(2, '0')}"
+}
+
+@Composable
+private fun SleepTimerDialog(onDismiss: () -> Unit, onPick: (Int) -> Unit) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surface,
+        title = { Text("睡眠定时", style = MaterialTheme.typography.titleMedium) },
+        text = {
+            Column {
+                Text("播放将在选定时间后自动暂停", style = MaterialTheme.typography.bodySmall, color = Text2)
+                Spacer(Modifier.height(10.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    listOf(15 to "15 分钟", 30 to "30 分钟", 60 to "60 分钟").forEach { (min, label) ->
+                        androidx.compose.material3.OutlinedButton(
+                            onClick = { onPick(min); onDismiss() },
+                            shape = RoundedCornerShape(10.dp)
+                        ) { Text(label) }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                androidx.compose.material3.TextButton(onClick = { onPick(0); onDismiss() }) {
+                    Text("取消定时", color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDismiss) { Text("关闭", color = Text2) }
+        }
+    )
 }

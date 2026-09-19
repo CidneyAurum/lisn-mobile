@@ -51,6 +51,7 @@ class PlaybackService : MediaSessionService() {
     private var playMode: String = "loop"
     private var resolveJob: Job? = null
     private var consecutiveFails = 0
+    private var sleepJob: Job? = null
 
     private val player: ExoPlayer?
         get() = mediaSession?.player as? ExoPlayer
@@ -143,6 +144,20 @@ class PlaybackService : MediaSessionService() {
                 pinnedProviderId = args.getString("pinned")?.ifEmpty { null }
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+            SessionCommands.SLEEP_TIMER -> {
+                sleepJob?.cancel()
+                val minutes = args.getInt("minutes", 0)
+                if (minutes > 0) {
+                    sleepJob = scope.launch {
+                        delay(minutes * 60_000L)
+                        withContext(Dispatchers.Main) {
+                            player?.pause()
+                        }
+                        broadcast(error = "睡眠时间到,已暂停播放")
+                    }
+                }
+                Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             SessionCommands.SET_PLAY_MODE -> {
                 val mode = args.getString("mode")
                 if (mode == "loop" || mode == "one" || mode == "shuffle") {
@@ -170,6 +185,7 @@ class PlaybackService : MediaSessionService() {
                 .add(SessionCommand(SessionCommands.PREV, Bundle.EMPTY))
                 .add(SessionCommand(SessionCommands.SET_PINNED, Bundle.EMPTY))
                 .add(SessionCommand(SessionCommands.SET_PLAY_MODE, Bundle.EMPTY))
+                .add(SessionCommand(SessionCommands.SLEEP_TIMER, Bundle.EMPTY))
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)

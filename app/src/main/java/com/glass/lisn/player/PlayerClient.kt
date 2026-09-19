@@ -34,6 +34,7 @@ object SessionCommands {
     const val STATE = "glass.state"
     const val SET_PINNED = "glass.setPinned"
     const val SET_PLAY_MODE = "glass.setPlayMode"
+    const val SLEEP_TIMER = "glass.sleepTimer"
 }
 
 /** 一次播放状态的广播(歌单快照 + 当前曲 + 加载/错误) */
@@ -165,6 +166,12 @@ class PlayerClient(context: Context) {
     fun setPinned(pinned: String?) {
         val args = Bundle().apply { putString("pinned", pinned) }
         controller?.sendCustomCommand(SessionCommand(SessionCommands.SET_PINNED, Bundle.EMPTY), args)
+    }
+
+    /** minutes<=0 取消定时 */
+    fun setSleepTimer(minutes: Int) {
+        val args = Bundle().apply { putInt("minutes", minutes) }
+        controller?.sendCustomCommand(SessionCommand(SessionCommands.SLEEP_TIMER, Bundle.EMPTY), args)
     }
 
     fun setPlayMode(mode: String) {
