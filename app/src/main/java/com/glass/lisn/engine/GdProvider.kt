@@ -70,7 +70,11 @@ class GdProvider : SourceProvider {
                             ))
                         )
                     }
-                } catch (e: Exception) { markFail(e) }
+                } catch (e: Exception) {
+                    markFail(e)
+                    android.util.Log.w("LisnResolve", "FAIL gd-search ${src.gd} p=$page: ${e.message}")
+                }
+                android.util.Log.i("LisnResolve", "SEARCH gd ${src.gd} p=$page -> ${out.size} 条 firstKey=${out.firstOrNull()?.key} firstId=${out.firstOrNull()?.origins?.firstOrNull()?.songId}")
                 out
             }
         }.awaitAll()

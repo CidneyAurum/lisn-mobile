@@ -22,6 +22,11 @@ class SourceRegistry(context: Context) {
     var mode: String = "auto"
     private var httpTemplates: List<HttpSourceConfig> = emptyList()
     private val picCache = mutableMapOf<String, String>()
+
+    // 解析失败黑名单:provider|platform|quality -> 失败时刻。TTL 内跨歌曲直接跳过,
+    // 避免同一后端故障时对重复条目发起连环注定失败的请求(免费源 503 场景实测 12s -> <1s)
+    private val failCache = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val failTtlMs = 60_000L
     private val mergedSongs = linkedMapOf<String, Song>()
     private val mergeMutex = Mutex()
     private var lastKeyword = ""
@@ -77,6 +82,9 @@ class SourceRegistry(context: Context) {
             }
             lastPage = maxOf(lastPage, page)
             val hasMore = totalThisPage >= 20
+            mergedSongs.values.firstOrNull()?.let { first ->
+                android.util.Log.i("LisnResolve", "MERGE 首曲 key=${first.key} origins=${first.origins.joinToString(",") { it.platform + ":" + it.songId.take(10) }}")
+            }
             com.glass.lisn.model.SearchPage(
                 songs = mergedSongs.values.toList(),
                 hasMore = hasMore,
@@ -93,10 +101,21 @@ class SourceRegistry(context: Context) {
         for (q in chain) {
             if (!p.caps.qualities.contains(q)) continue
             for (o in origins) {
+                val key = "${p.id}|${o.platform}|$q"
+                val until = failCache[key]
+                if (until != null && System.currentTimeMillis() < until) {
+                    android.util.Log.d("LisnResolve", "SKIP ${p.id} $q ${o.platform}:${o.songId.take(16)} (TTL 黑名单)")
+                    continue
+                }
                 try {
                     val url = withTimeoutMs(15000) { p.resolveUrl(o, q) }
+                    failCache.remove(key)
+                    android.util.Log.i("LisnResolve", "OK ${p.id} $q ${o.platform}:${o.songId.take(24)}")
                     return ResolveResult(url, p.id, o.platform, q)
-                } catch (_: Throwable) { /* 下一个 */ }
+                } catch (e: Throwable) {
+                    failCache[key] = System.currentTimeMillis() + failTtlMs
+                    android.util.Log.w("LisnResolve", "FAIL ${p.id} $q ${o.platform}:${o.songId.take(24)}: ${e.message}")
+                }
             }
         }
         return null

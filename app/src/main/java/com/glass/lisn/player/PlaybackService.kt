@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
@@ -49,6 +50,7 @@ class PlaybackService : MediaSessionService() {
     private var pinnedProviderId: String? = null
     private var playMode: String = "loop"
     private var resolveJob: Job? = null
+    private var consecutiveFails = 0
 
     private val player: ExoPlayer?
         get() = mediaSession?.player as? ExoPlayer
@@ -159,6 +161,8 @@ class PlaybackService : MediaSessionService() {
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
             val result = super.onConnect(session, controller)
+            // UI 重连时主动推送一次完整状态,否则重连后的界面拿不到服务侧队列
+            scope.launch { broadcast() }
             val sessionCommands = result.availableSessionCommands.buildUpon()
                 .add(SessionCommand(SessionCommands.PLAY, Bundle.EMPTY))
                 .add(SessionCommand(SessionCommands.PLAY_LOCAL, Bundle.EMPTY))
@@ -217,10 +221,19 @@ class PlaybackService : MediaSessionService() {
                     p.prepare()
                     p.play()
                 }
+                consecutiveFails = 0
                 broadcast(loading = false, resolve = "${res.providerId}/${res.platform}/${res.quality}")
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
+                consecutiveFails++
+                broadcast(loading = false, error = if (consecutiveFails >= queue.size) "解析失败:队列内全部音源均不可用(后端可能暂时故障)" else "第 $queueIdx 首解析失败,自动切下一首…")
+                if (consecutiveFails < queue.size && queue.size > 1) {
+                    // 自动顺序跳下一首(随机模式下也顺序跳,保证不重复不遗漏)
+                    queueIdx = (queueIdx + 1) % queue.size
+                    val next = queue.getOrNull(queueIdx)
+                    if (next != null) { delay(800); resolveAndPlay(); return@launch }
+                }
                 broadcast(loading = false, error = "解析失败:${e.message ?: e.toString()}")
                 withContext(Dispatchers.Main) { p.pause() }
             }
