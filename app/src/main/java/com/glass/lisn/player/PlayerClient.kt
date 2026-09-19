@@ -169,6 +169,10 @@ class PlayerClient(context: Context) {
     }
 
     /** minutes<=0 取消定时 */
+    fun clearQueue() {
+        controller?.sendCustomCommand(SessionCommand(SessionCommands.CLEAR_QUEUE, Bundle.EMPTY), Bundle.EMPTY)
+    }
+
     fun setSleepTimer(minutes: Int) {
         val args = Bundle().apply { putInt("minutes", minutes) }
         controller?.sendCustomCommand(SessionCommand(SessionCommands.SLEEP_TIMER, Bundle.EMPTY), args)

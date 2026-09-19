@@ -194,6 +194,17 @@ class PlaybackService : MediaSessionService() {
                 pinnedProviderId = args.getString("pinned")?.ifEmpty { null }
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
+            SessionCommands.CLEAR_QUEUE -> {
+                resolveJob?.cancel()
+                queue = emptyList(); queueIdx = -1; consecutiveFails = 0
+                persistQueue()
+                scope.launch(Dispatchers.Main) {
+                    player?.pause()
+                    player?.clearMediaItems()
+                }
+                broadcast()
+                Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+            }
             SessionCommands.SLEEP_TIMER -> {
                 sleepJob?.cancel()
                 val minutes = args.getInt("minutes", 0)

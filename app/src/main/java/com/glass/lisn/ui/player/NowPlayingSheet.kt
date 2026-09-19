@@ -175,6 +175,16 @@ fun NowPlayingSheet(vm: AppViewModel) {
                         .background(Color(0xD90D1017))
                         .padding(horizontal = 8.dp)
                 ) {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "清空队列(" + playback.queue.size + ")",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .clickable { vm.player.clearQueue() }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        )
+                    }
                     LazyColumn(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (playback.queue.isEmpty()) {
                             item {
