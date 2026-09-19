@@ -208,7 +208,9 @@ class MusicFreeManager(context: Context) {
                     )
                 }
             } catch (e: Throwable) {
-                markFail(e); emptyList()
+                markFail(e)
+                android.util.Log.w("LisnResolve", "FAIL ${id} search '$keyword' p=$page: ${e.message}")
+                emptyList()
             }
         }
 

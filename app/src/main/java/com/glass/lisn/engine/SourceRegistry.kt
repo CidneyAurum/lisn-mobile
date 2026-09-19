@@ -71,7 +71,12 @@ class SourceRegistry(context: Context) {
     suspend fun search(keyword: String, page: Int): com.glass.lisn.model.SearchPage = coroutineScope {
         val searchers = providers.filter { it.caps.supportsSearch && it.health.status != "disabled" }
         val pages = searchers.map { p ->
-            async(Dispatchers.IO) { runCatching { p.search(keyword, page) }.getOrDefault(emptyList()) }
+            async(Dispatchers.IO) {
+                runCatching { p.search(keyword, page) }.getOrElse { e ->
+                    android.util.Log.w("LisnResolve", "FAIL ${p.id} search '$keyword' p=$page: ${e.message}")
+                    emptyList()
+                }
+            }
         }.awaitAll()
         val lists = pages.flatten()
         val totalThisPage = pages.sumOf { it.size }
