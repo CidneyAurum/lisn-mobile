@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Shuffle
@@ -214,9 +215,17 @@ fun DiscoverView(vm: AppViewModel) {
                             .padding(12.dp),
                         contentAlignment = Alignment.BottomStart
                     ) {
-                        Column {
-                            Icon(Icons.Filled.Shuffle, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
-                            Text(k, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Icon(Icons.Filled.Shuffle, null, tint = Color.White.copy(alpha = 0.85f), modifier = Modifier.size(20.dp))
+                                Text(k, style = MaterialTheme.typography.titleMedium, color = Color.White, fontWeight = FontWeight.Bold)
+                            }
+                            IconButton(onClick = {
+                                dailyLoading = true
+                                scope.launch { runCatching { vm.playKeyword(k) }; dailyLoading = false }
+                            }) {
+                                Icon(Icons.Filled.PlayArrow, "播放", tint = Color.White)
+                            }
                         }
                     }
                 }

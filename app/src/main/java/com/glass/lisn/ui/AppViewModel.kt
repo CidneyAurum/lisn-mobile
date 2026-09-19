@@ -351,6 +351,28 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------- 本地库 ----------
 
+    /** 每日推荐一键播放:搜索关键词并直接播放首曲(入队整页结果) */
+    fun playKeyword(kw: String) {
+        viewModelScope.launch {
+            try {
+                val r = EngineHub.registry.search(kw, 1)
+                if (r.songs.isEmpty()) { showToast("「$kw」无结果"); return@launch }
+                results = r.songs
+                keyword = kw
+                hasMore = r.hasMore
+                page = r.page
+                searched = true
+                searchError = null
+                EngineHub.searchHistory.record(kw)
+                searchHistory = EngineHub.searchHistory.items
+                view = View.SEARCH
+                play(r.songs.first(), r.songs)
+            } catch (e: Throwable) {
+                showToast("播放失败:${e.message ?: e.toString()}")
+            }
+        }
+    }
+
     fun removeSearchHistory(kw: String) {
         EngineHub.searchHistory.remove(kw)
         searchHistory = EngineHub.searchHistory.items
