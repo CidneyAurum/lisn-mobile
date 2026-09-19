@@ -59,6 +59,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val downloads get() = EngineHub.downloads.queue
 
     init {
+        // 下载完成后自动刷新本地音乐列表
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            var lastCompleted = -1
+            EngineHub.downloads.queue.collect { list ->
+                val done = list.count { it.status == com.glass.lisn.model.DownloadStatus.COMPLETED }
+                if (done != lastCompleted) {
+                    lastCompleted = done
+                    library = DownloadManager.scanLibrary(getApplication())
+                }
+            }
+        }
         player.connect()
         refreshSources()
         refreshPlaylists()
