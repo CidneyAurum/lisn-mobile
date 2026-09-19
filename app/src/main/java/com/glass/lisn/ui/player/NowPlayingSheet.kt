@@ -131,6 +131,13 @@ fun NowPlayingSheet(vm: AppViewModel) {
             .background(MaterialTheme.colorScheme.background)
             .padding(horizontal = 20.dp)
     ) {
+        // 沉浸背景:封面铺满 + 重遮罩
+        if (!song?.picUrl.isNullOrEmpty()) {
+            Box(Modifier.fillMaxSize()) {
+                AsyncImage(song.picUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = 0.86f)))
+            }
+        }
         // 顶部:收起 + 曲名区
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.nowPlayingOpen = false }) {

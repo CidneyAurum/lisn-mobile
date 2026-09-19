@@ -121,12 +121,21 @@ fun SearchView(vm: AppViewModel) {
             }
             if (!vm.searching && vm.searchError != null) {
                 item {
-                    Text(
-                        "搜索失败:${vm.searchError}",
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = Modifier.padding(20.dp)
-                    )
+                    Column(Modifier.fillMaxWidth().padding(20.dp)) {
+                        Text(
+                            "搜索失败:${vm.searchError}",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Button(
+                            onClick = { vm.doSearch(vm.keyword) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            Text("重试")
+                        }
+                    }
                 }
             }
             if (!vm.searching && vm.searched && vm.results.isEmpty() && vm.searchError == null) {
