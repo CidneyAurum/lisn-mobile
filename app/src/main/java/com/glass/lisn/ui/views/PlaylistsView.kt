@@ -21,6 +21,7 @@ import androidx.compose.material.icons.automirrored.filled.PlaylistAdd
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DriveFileRenameOutline
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material3.Icon
@@ -149,13 +150,25 @@ private fun PlaylistDetailView(vm: AppViewModel, playlist: com.glass.lisn.model.
                 Text(playlist.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 Text("${playlist.songs.size} 首", style = MaterialTheme.typography.bodySmall, color = Text2)
             }
-            IconButton(
-                onClick = {
-                    if (playlist.songs.isNotEmpty()) vm.play(playlist.songs.first(), playlist.songs)
-                },
-                enabled = playlist.songs.isNotEmpty()
-            ) {
-                Icon(Icons.Filled.PlayArrow, "播放全部", tint = MaterialTheme.colorScheme.primary)
+            Row {
+                IconButton(
+                    onClick = {
+                        // 对齐桌面端:节流保护,批量下载前 5 首
+                        playlist.songs.take(5).forEach { vm.enqueueDownload(it) }
+                        vm.showToast("已把前 ${minOf(5, playlist.songs.size)} 首加入下载队列")
+                    },
+                    enabled = playlist.songs.isNotEmpty()
+                ) {
+                    Icon(Icons.Filled.Download, "下载前 5 首", tint = Text2)
+                }
+                IconButton(
+                    onClick = {
+                        if (playlist.songs.isNotEmpty()) vm.play(playlist.songs.first(), playlist.songs)
+                    },
+                    enabled = playlist.songs.isNotEmpty()
+                ) {
+                    Icon(Icons.Filled.PlayArrow, "播放全部", tint = MaterialTheme.colorScheme.primary)
+                }
             }
         }
         LazyColumn(contentPadding = PaddingValues(bottom = 16.dp)) {
