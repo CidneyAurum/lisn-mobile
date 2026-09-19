@@ -42,6 +42,9 @@ android {
     buildFeatures {
         compose = true
     }
+    testOptions {
+        unitTests.isIncludeAndroidResources = false
+    }
     lint {
         // Windows 下 lintVital 依赖解析存在环境路径问题,质量门为模拟器实测
         checkReleaseBuilds = false
@@ -77,4 +80,8 @@ dependencies {
     implementation("io.github.dokar3:quickjs-kt:1.0.15")
     implementation("io.coil-kt:coil-compose:2.7.0")
     implementation("org.jsoup:jsoup:1.18.1")
+}
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
 }
