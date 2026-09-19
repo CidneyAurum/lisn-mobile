@@ -151,7 +151,8 @@ fun NowPlayingSheet(vm: AppViewModel) {
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(title, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(artist, style = MaterialTheme.typography.bodySmall, color = Text2, maxLines = 1)
+                Text(listOfNotNull(artist, song?.album?.takeIf { it.isNotBlank() }).joinToString(" · "),
+                    style = MaterialTheme.typography.bodySmall, color = Text2, maxLines = 1)
             }
             IconButton(onClick = { if (song != null) showAddDialog = true }) {
                 Icon(Icons.Filled.PlaylistAdd, "加入歌单", tint = Text2)
