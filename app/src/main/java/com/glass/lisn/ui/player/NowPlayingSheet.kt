@@ -44,6 +44,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -119,19 +120,21 @@ fun NowPlayingSheet(vm: AppViewModel) {
     }
 
 
-    Column(
+    Box(
         Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
-            .padding(horizontal = 20.dp)
     ) {
-        // 沉浸背景:封面铺满 + 重遮罩
+        // 沉浸背景:封面铺满 + 重遮罩(叠层,不占布局空间)
         if (!song?.picUrl.isNullOrEmpty()) {
-            Box(Modifier.fillMaxSize()) {
-                AsyncImage(song.picUrl, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background.copy(alpha = 0.86f)))
-            }
+            AsyncImage(song.picUrl, null, Modifier.matchParentSize(), contentScale = ContentScale.Crop)
+            Box(Modifier.matchParentSize().background(MaterialTheme.colorScheme.background.copy(alpha = 0.86f)))
         }
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp)
+        ) {
         // 顶部:收起 + 曲名区
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = { vm.nowPlayingOpen = false }) {
@@ -156,8 +159,22 @@ fun NowPlayingSheet(vm: AppViewModel) {
         // 中部:封面 / 歌词 / 队列
         Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             when (centerTab) {
-                "lyric" -> LyricSection(vm, lrc)
-                "queue" -> {
+                "lyric" -> Column(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xD90D1017))
+                        .padding(horizontal = 8.dp)
+                ) {
+                    LyricSection(vm, lrc)
+                }
+                "queue" -> Column(
+                    Modifier
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(Color(0xD90D1017))
+                        .padding(horizontal = 8.dp)
+                ) {
                     LazyColumn(modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
                         if (playback.queue.isEmpty()) {
                             item {
@@ -294,6 +311,7 @@ fun NowPlayingSheet(vm: AppViewModel) {
             IconButton(onClick = { vm.player.next() }, modifier = Modifier.size(56.dp)) {
                 Icon(Icons.Filled.SkipNext, "下一曲", modifier = Modifier.size(36.dp))
             }
+        }
         }
     }
 
