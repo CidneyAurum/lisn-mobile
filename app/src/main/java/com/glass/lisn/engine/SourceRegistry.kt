@@ -49,9 +49,12 @@ class SourceRegistry(context: Context) {
         providers = list
     }
 
+    fun blacklistCount(): Int = failCache.count { System.currentTimeMillis() < it.value }
+
     fun snapshot(): SourcesSnapshot = SourcesSnapshot(
         providers = providers.map { ProviderSnapshot(it.id, it.name, it.kind, it.caps, it.health) },
         mode = mode,
+        blacklistedCount = blacklistCount(),
         lxEntries = lx.entries.map { e ->
             val host = lx.hostFor(e.id)
             com.glass.lisn.model.LxEntrySnap(

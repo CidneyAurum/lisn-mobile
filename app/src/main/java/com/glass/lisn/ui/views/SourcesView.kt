@@ -96,7 +96,8 @@ fun SourcesView(vm: AppViewModel) {
             Column(Modifier.weight(1f)) {
                 Text("解析模式", style = MaterialTheme.typography.bodyMedium)
                 Text(
-                    if (sources.mode == "auto") "自动:按音源顺序竞速,首个成功者播放" else "手动:锁定单个音源解析",
+                    (if (sources.mode == "auto") "自动:按音源顺序竞速,首个成功者播放" else "手动:锁定单个音源解析") +
+                        if (sources.blacklistedCount > 0) " · ${sources.blacklistedCount} 个失败通道暂时跳过(60s)" else "",
                     style = MaterialTheme.typography.bodySmall, color = Text2
                 )
             }

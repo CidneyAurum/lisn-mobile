@@ -93,7 +93,8 @@ data class SourcesSnapshot(
     val mode: String,
     val mfEntries: List<MfEntrySnap>,
     val templates: List<HttpTemplateSnap>,
-    val lxEntries: List<LxEntrySnap> = emptyList()
+    val lxEntries: List<LxEntrySnap> = emptyList(),
+    val blacklistedCount: Int = 0
 )
 
 enum class DownloadStatus { WAITING, RESOLVING, DOWNLOADING, COMPLETED, FAILED, CANCELLED }
