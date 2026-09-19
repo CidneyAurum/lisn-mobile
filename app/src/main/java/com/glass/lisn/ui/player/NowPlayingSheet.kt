@@ -216,12 +216,23 @@ fun NowPlayingSheet(vm: AppViewModel) {
                                         color = if (active) MaterialTheme.colorScheme.primary else Text1,
                                         maxLines = 1, overflow = TextOverflow.Ellipsis
                                     )
-                                    Text(
-                                        q.artist,
-                                        fontSize = 11.sp,
-                                        color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else Text3,
-                                        maxLines = 1, overflow = TextOverflow.Ellipsis
-                                    )
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Text(
+                                            q.artist,
+                                            fontSize = 11.sp,
+                                            color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else Text3,
+                                            maxLines = 1, overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f, fill = false)
+                                        )
+                                        q.durationMs?.let {
+                                            Spacer(Modifier.width(8.dp))
+                                            Text(
+                                                formatMs(it),
+                                                fontSize = 10.sp,
+                                                color = if (active) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f) else Text3
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
