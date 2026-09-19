@@ -105,8 +105,12 @@ class GdProvider : SourceProvider {
         val gd = platformToGd[origin.platform] ?: return null
         return try {
             val j = gdFetch(mapOf("types" to "lyric", "source" to gd, "id" to lyricId))
-            if (j is String) (if (j.startsWith("http")) null else j)
-            else str((j as? Map<*, *>)?.get("lyric"))
+            if (j is String) return if (j.startsWith("http")) null else j
+            val m = j as? Map<*, *> ?: return null
+            val raw = str(m["lyric"]) ?: return null
+            // 外语歌优先中文翻译:GD tlyric 按时间就近替换行文本
+            val tlyric = str(m["tlyric"])
+            if (!tlyric.isNullOrBlank() && LyricTranslate.isForeign(raw)) LyricTranslate.merge(raw, tlyric) else raw
         } catch (_: Throwable) { null }
     }
 

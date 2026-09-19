@@ -28,6 +28,9 @@ class LimbusOverlayView(context: Context) : View(context) {
     private var basePosMs = 0L
     private var basePosTick = 0L
     private var playing = false
+    private var posChangedAt = 0L
+    private var scheduled = false
+    private var lastDrawn = 0L
 
     // 演出状态
     private var shownIdx = -1
@@ -71,14 +74,23 @@ class LimbusOverlayView(context: Context) : View(context) {
         chars = CharArray(0)
         charShown = 0
         fading.clear()
-        postInvalidateOnAnimation()
+        wake()
     }
 
     fun setPos(posMs: Long, isPlaying: Boolean) {
-        if (basePosMs == 0L && posMs > 0) android.util.Log.i("LisnOverlay", "setPos first=$posMs play=$isPlaying")
         basePosMs = posMs
         basePosTick = SystemClock.elapsedRealtime()
         playing = isPlaying
+        posChangedAt = SystemClock.elapsedRealtime()
+        wake()
+    }
+
+    /** 闲置停机后的唤醒入口(幂等) */
+    private fun wake() {
+        if (!scheduled) {
+            scheduled = true
+            postInvalidateOnAnimation()
+        }
     }
 
     // ---- 过滤规则(对齐 PC 端) ----
@@ -201,14 +213,31 @@ class LimbusOverlayView(context: Context) : View(context) {
             }
         }
 
-        // 绘制
+        // 闲置停机:无当前行且无淡出行;或暂停定格且无淡出行
+        val paused = now - posChangedAt > 2500
+        if ((cur < 0 && fading.isEmpty()) || (paused && fading.isEmpty())) {
+            if (fading.isEmpty() && (cur < 0 || shownIdx >= 0)) {
+                canvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+                if (cur < 0) shownIdx = -1
+            }
+            scheduled = false
+            return
+        }
+
+        // 绘制(30fps 上限)
+        if (now - lastDrawn >= 33) {
+            lastDrawn = now
+            paintFrame(canvas, cur)
+        }
+        postInvalidateDelayed(33)
+    }
+
+    private fun paintFrame(canvas: Canvas, cur: Int) {
         canvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
         for (f in fading) drawLine(canvas, f.chars, f.x, f.y, f.angle, f.fontPx, f.px, f.py, f.sx, f.alpha / 255f, null)
         if (cur >= 0 && charShown > 0) {
             drawLine(canvas, chars.copyOfRange(0, charShown), anchorX, anchorY, angleDeg, fontPx, pPx, pPy, pSx, 1f, shakes)
         }
-
-        postInvalidateOnAnimation()
     }
 
     private fun drawLine(
