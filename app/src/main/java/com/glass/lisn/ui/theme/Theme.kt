@@ -11,16 +11,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
 // 桌面端 glass.css 的深空 aurora 色板
-val BgDeep = Color(0xFF07090F)
-val BgRaise = Color(0xFF0D1017)
+val BgDeep = Color(0xFF05090B)
+val BgRaise = Color(0xFF0B1113)
 val CardGlass = Color(0x0EFFFFFF)
 val CardGlassHover = Color(0x16FFFFFF)
 val Stroke = Color(0x1AFFFFFF)
-val Aurora1 = Color(0xFF5E5CE6)
-val Aurora2 = Color(0xFFFF2D55)
-val Aurora3 = Color(0xFF64D2FF)
-val Accent = Color(0xFF6E6BFF)
-val AccentSoft = Color(0x296E6BFF)
+val Aurora1 = Color(0xFF39C5BB)
+val Aurora2 = Color(0xFFE12885)
+val Aurora3 = Color(0xFF86CECB)
+val Accent = Color(0xFF39C5BB)
+val AccentSoft = Color(0x2939C5BB)
 val Text1 = Color(0xF0FFFFFF)
 val Text2 = Color(0x99FFFFFF)
 val Text3 = Color(0x61FFFFFF)

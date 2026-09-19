@@ -99,3 +99,5 @@ app/src/main/java/com/glass/lisn/
 - 应用数据全部在自身沙箱(`filesDir` 的 `engine/`、`mf-sources/` 与 JSON 存储),不读写设备外任何应用数据。
 - 网络仅访问音源相关公开接口(GD音乐台、各平台搜索接口、GitHub/jsdelivr 拉取插件脚本)。
 - 测试用模拟器为独立创建的 `lisn-test` AVD,未改动既有 AVD。
+
+> 主题:初音未来配色与背景插画 · 画作「千年」(asahi_kuroi),依 piapro character license 非商用使用
