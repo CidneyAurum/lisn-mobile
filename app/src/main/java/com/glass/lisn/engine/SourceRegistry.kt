@@ -90,18 +90,20 @@ class SourceRegistry(context: Context) {
             }
             for (s in lists) {
                 if (s.name.isEmpty()) continue
-                val found = mergedSongs[s.key]
+                // 统一强归一化键:不同源的同一首歌合并为一条(与 PC 端一致)
+                val mk = mergeKey(s.name, s.artist)
+                val found = mergedSongs[mk]
                 if (found != null) {
                     val newOrigins = s.origins.filter { o ->
                         found.origins.none { it.platform == o.platform && it.songId == o.songId }
                     }
-                    mergedSongs[s.key] = found.copy(
+                    mergedSongs[mk] = found.copy(
                         origins = found.origins + newOrigins,
                         album = found.album ?: s.album,
                         picUrl = found.picUrl ?: s.picUrl
                     )
                 } else {
-                    mergedSongs[s.key] = s
+                    mergedSongs[mk] = s.copy(key = mk)
                 }
             }
             lastPage = maxOf(lastPage, page)
@@ -115,6 +117,26 @@ class SourceRegistry(context: Context) {
                 page = page
             )
         }
+    }
+
+    /** 强归一化:去空白/标点、全角转半角、统一小写,使跨源同曲合并 */
+    private val PUNCT = setOf('(', ')', '（', '）', '[', ']', '【', '】', '{', '}', '·', '・', '-', '—', '–', '_', ',', '.', '、', '!', '！', '?', '？', ':', '：', ';', '；', '/', '|', '&', '+', '*', '#', '~', '^', '@', '%', '“', '”', '‘', '’', '\\', '\'', '"', '$')
+
+    private fun normText(s: String): String {
+        val sb = StringBuilder()
+        for (ch in s) {
+            val code = ch.code
+            val c = if (code in 0xFF01..0xFF5E) (code - 0xFEE0).toChar() else ch
+            if (c.isWhitespace() || c in PUNCT) continue
+            sb.append(c.lowercaseChar())
+        }
+        return sb.toString()
+    }
+
+    private fun mergeKey(name: String, artist: String): String {
+        val first = artist.split('/', '、', ',', '&').firstOrNull() ?: artist
+        val a = Regex("(?i)feat\\.?").split(first).firstOrNull() ?: first
+        return normText(name) + "|" + normText(a).take(8)
     }
 
     private suspend fun tryProvider(
