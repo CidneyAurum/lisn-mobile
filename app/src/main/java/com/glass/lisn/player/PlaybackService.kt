@@ -3,11 +3,13 @@ package com.glass.lisn.player
 import android.app.PendingIntent
 import android.content.Intent
 import android.os.Bundle
+import android.util.AtomicFile
 import androidx.core.net.toUri
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.ExoPlayer
@@ -31,13 +33,13 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.builtins.ListSerializer
-import kotlinx.serialization.json.Json
 import kotlin.random.Random
 
 /**
@@ -48,23 +50,54 @@ import kotlin.random.Random
 class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // MediaSession callbacks, player access and queue mutations share the player looper.
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val persistenceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val persistenceUpdates = Channel<PlaybackQueueSnapshot>(Channel.CONFLATED)
+    private val queueStorageLock = Any()
     private var queue: List<Song> = emptyList()
+    private var queueJson = "[]"
+    private var queueRevision = 0L
     private var queueIdx: Int = -1
-    private var quality: String = "320k"
     private var pinnedProviderId: String? = null
     private var playMode: String = "loop"
     private var resolveJob: Job? = null
     private var consecutiveFails = 0
     private var sleepJob: Job? = null
+    private var playbackRequest = 0L
+    private var resolving = false
+    private var playbackError: String? = null
+    private var resolveInfo: String? = null
+    private var localTitle: String? = null
 
     private val player: ExoPlayer?
         get() = mediaSession?.player as? ExoPlayer
 
     override fun onCreate() {
         super.onCreate()
-        quality = EngineHub.settings.get().quality
         playMode = EngineHub.settings.get().playMode
+        persistenceScope.launch {
+            try {
+                for (snapshot in persistenceUpdates) {
+                    runCatching {
+                        val data = snapshot.encode().toByteArray(Charsets.UTF_8)
+                        synchronized(queueStorageLock) {
+                            val file = AtomicFile(queueFile())
+                            val output = file.startWrite()
+                            try {
+                                output.write(data)
+                                file.finishWrite(output)
+                            } catch (e: Throwable) {
+                                file.failWrite(output)
+                                throw e
+                            }
+                        }
+                    }.onFailure { android.util.Log.w("LisnPlayback", "保存队列失败", it) }
+                }
+            } finally {
+                persistenceScope.cancel()
+            }
+        }
         restoreQueue()
 
         val httpFactory = DefaultHttpDataSource.Factory()
@@ -88,11 +121,21 @@ class PlaybackService : MediaSessionService() {
         applyRepeatMode(p)
 
         // 桌面歌词:进度循环(300ms 级推送,视图内部插值平滑)
-        scope.launch(Dispatchers.Main) {
+        scope.launch {
+            var previousPosition = -1L
+            var previousPlaying = false
             while (coroutineContext.isActive) {
                 val pl = player
                 if (pl != null && com.glass.lisn.ui.overlay.DesktopLyricsOverlay.isRunning) {
-                    com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onPos(pl.currentPosition.coerceAtLeast(0), pl.isPlaying)
+                    val position = pl.currentPosition.coerceAtLeast(0)
+                    val playing = pl.isPlaying
+                    if (position != previousPosition || playing != previousPlaying) {
+                        com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onPos(position, playing)
+                        previousPosition = position
+                        previousPlaying = playing
+                    }
+                } else {
+                    previousPosition = -1L
                 }
                 delay(300)
             }
@@ -125,40 +168,43 @@ class PlaybackService : MediaSessionService() {
 
     /** 应用重启后恢复上次队列(不自动播放,等用户点播放) */
     private fun restoreQueue() {
-        runCatching {
-            val f = queueFile()
-            if (!f.exists()) return
-            val obj = json.parseToJsonElement(f.readText()).let { com.glass.lisn.engine.jsonToJsonNative(it) } as? Map<*, *> ?: return
-            // persistQueue 写入的是字符串化 JSON,需二次解析
-            val qRaw = obj["queue"]
-            val q: List<*> = when (qRaw) {
-                is List<*> -> qRaw
-                is String -> runCatching {
-                    com.glass.lisn.engine.jsonToJsonNative(json.parseToJsonElement(qRaw)) as? List<*>
-                }.getOrNull() ?: return
-                else -> return
-            }
-            queue = q.mapNotNull { item ->
-                (item as? Map<*, *>)?.let { m ->
-                    runCatching { json.decodeFromString(Song.serializer(), Json.encodeToString(kotlinx.serialization.json.JsonElement.serializer(), com.glass.lisn.engine.anyToJsonElement(m))) }.getOrNull()
-                }
-            }
-            queueIdx = (obj["index"] as? Double)?.toInt() ?: -1
-            if (queueIdx >= queue.size) queueIdx = queue.size - 1
+        val revision = queueRevision
+        scope.launch {
+            val restored = withContext(Dispatchers.IO) {
+                runCatching {
+                    synchronized(queueStorageLock) {
+                        AtomicFile(queueFile()).openRead().bufferedReader().use {
+                            PlaybackQueueSnapshot.decode(it.readText())
+                        }
+                    }
+                }.getOrNull()
+            } ?: return@launch
+            // A play/clear command arriving during disk IO takes precedence over restoration.
+            if (queueRevision != revision) return@launch
+            replaceQueue(restored.queue)
+            queueIdx = restored.index
             android.util.Log.i("LisnPlayback", "恢复队列: ${queue.size} 首, idx=$queueIdx")
+            broadcast()
         }
     }
 
+    private fun replaceQueue(songs: List<Song>) {
+        queueRevision++
+        if (songs == queue) return
+        queue = songs
+        queueJson = json.encodeToString(ListSerializer(Song.serializer()), songs)
+    }
+
     private fun persistQueue() {
-        runCatching {
-            queueFile().writeText(json.encodeToString(
-                kotlinx.serialization.json.JsonElement.serializer(),
-                com.glass.lisn.engine.anyToJsonElement(mapOf(
-                    "queue" to json.encodeToString(ListSerializer(Song.serializer()), queue),
-                    "index" to queueIdx
-                ))
-            ))
-        }
+        // One writer preserves ordering; rapid skips only persist the latest pending snapshot.
+        persistenceUpdates.trySend(PlaybackQueueSnapshot(queue, queueIdx))
+    }
+
+    private fun cancelResolve() {
+        playbackRequest++
+        resolveJob?.cancel()
+        resolveJob = null
+        resolving = false
     }
 
     private fun applyRepeatMode(p: ExoPlayer) {
@@ -169,6 +215,12 @@ class PlaybackService : MediaSessionService() {
     private val playerListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
             if (playbackState == Player.STATE_ENDED) scope.launch { advance(1) }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            resolving = false
+            playbackError = "播放失败:${error.message ?: error.errorCodeName}"
+            broadcast()
         }
     }
 
@@ -188,8 +240,11 @@ class PlaybackService : MediaSessionService() {
                 }
                 val idx = args.getInt("index", -1)
                 if (song != null) {
-                    queue = q ?: listOf(song)
-                    queueIdx = if (idx >= 0) idx else queue.indexOfFirst { it.key == song.key }.coerceAtLeast(0)
+                    val selection = PlaybackQueueSnapshot.select(song, q, idx)
+                    replaceQueue(selection.queue)
+                    queueIdx = selection.index
+                    consecutiveFails = 0
+                    localTitle = null
                     resolveAndPlay()
                 }
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -208,13 +263,13 @@ class PlaybackService : MediaSessionService() {
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
             SessionCommands.CLEAR_QUEUE -> {
-                resolveJob?.cancel()
-                queue = emptyList(); queueIdx = -1; consecutiveFails = 0
+                cancelResolve()
+                replaceQueue(emptyList()); queueIdx = -1; consecutiveFails = 0
+                localTitle = null; playbackError = null; resolveInfo = null
                 persistQueue()
-                scope.launch(Dispatchers.Main) {
-                    player?.pause()
-                    player?.clearMediaItems()
-                }
+                player?.pause()
+                player?.clearMediaItems()
+                com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onSongChanged(null)
                 broadcast()
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
             }
@@ -224,10 +279,9 @@ class PlaybackService : MediaSessionService() {
                 if (minutes > 0) {
                     sleepJob = scope.launch {
                         delay(minutes * 60_000L)
-                        withContext(Dispatchers.Main) {
-                            player?.pause()
-                        }
-                        broadcast(error = "睡眠时间到,已暂停播放")
+                        player?.pause()
+                        playbackError = "睡眠时间到,已暂停播放"
+                        broadcast()
                     }
                 }
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -237,7 +291,7 @@ class PlaybackService : MediaSessionService() {
                 if (mode == "loop" || mode == "one" || mode == "shuffle") {
                     playMode = mode
                     EngineHub.settings.patch(EngineHub.settings.get().copy(playMode = mode))
-                    scope.launch(Dispatchers.Main) { player?.let { applyRepeatMode(it) } }
+                    player?.let { applyRepeatMode(it) }
                     broadcast()
                 }
                 Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
@@ -250,8 +304,6 @@ class PlaybackService : MediaSessionService() {
             controller: MediaSession.ControllerInfo
         ): MediaSession.ConnectionResult {
             val result = super.onConnect(session, controller)
-            // UI 重连时主动推送一次完整状态,否则重连后的界面拿不到服务侧队列
-            scope.launch { broadcast() }
             val sessionCommands = result.availableSessionCommands.buildUpon()
                 .add(SessionCommand(SessionCommands.PLAY, Bundle.EMPTY))
                 .add(SessionCommand(SessionCommands.PLAY_LOCAL, Bundle.EMPTY))
@@ -260,44 +312,66 @@ class PlaybackService : MediaSessionService() {
                 .add(SessionCommand(SessionCommands.SET_PINNED, Bundle.EMPTY))
                 .add(SessionCommand(SessionCommands.SET_PLAY_MODE, Bundle.EMPTY))
                 .add(SessionCommand(SessionCommands.SLEEP_TIMER, Bundle.EMPTY))
+                .add(SessionCommand(SessionCommands.CLEAR_QUEUE, Bundle.EMPTY))
                 .build()
             return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
                 .setAvailableSessionCommands(sessionCommands)
                 .build()
         }
+
+        override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            // onConnect runs before the controller is connected, so its broadcasts can be lost.
+            session.sendCustomCommand(controller, SessionCommand(SessionCommands.STATE, Bundle.EMPTY), stateArgs())
+        }
     }
 
     private fun playLocal(uri: String, title: String, artist: String) {
         val p = player ?: return
+        cancelResolve()
+        // Keep the online queue available for Next, but display the local item as current.
+        queueRevision++
+        queueIdx = -1
+        consecutiveFails = 0
+        localTitle = title
+        playbackError = null
+        resolveInfo = null
         com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onSongChanged(
             Song(key = "local:$uri", name = title, artist = artist)
         )
-        scope.launch {
-            withContext(Dispatchers.Main) {
-                p.setMediaItem(
-                    MediaItem.Builder()
-                        .setMediaId("local:$uri")
-                        .setUri(uri.toUri())
-                        .setMediaMetadata(
-                            MediaMetadata.Builder().setTitle(title).setArtist(artist).build()
-                        )
-                        .build()
+        p.setMediaItem(
+            MediaItem.Builder()
+                .setMediaId("local:$uri")
+                .setUri(uri.toUri())
+                .setMediaMetadata(
+                    MediaMetadata.Builder().setTitle(title).setArtist(artist).build()
                 )
-                p.prepare()
-                p.play()
-            }
-        }
+                .build()
+        )
+        p.prepare()
+        p.play()
+        broadcast()
     }
 
-    private fun resolveAndPlay() {
+    private fun resolveAndPlay(autoPlay: Boolean = true) {
         val p = player ?: return
         val song = queue.getOrNull(queueIdx) ?: return
-        resolveJob?.cancel()
+        cancelResolve()
+        val request = playbackRequest
         val q = EngineHub.settings.get().quality  // 实时读取:切音质后无需重启服务
-        broadcast(loading = true)
+        val pinned = pinnedProviderId
+        resolving = true
+        localTitle = null
+        playbackError = null
+        resolveInfo = null
+        // Stop the previous stream while resolving. A Pause received during IO remains effective.
+        p.stop()
+        p.playWhenReady = autoPlay
+        com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onSongChanged(null)
+        broadcast()
         resolveJob = scope.launch {
             try {
-                val res = EngineHub.registry.resolveUrl(song, q, pinnedProviderId)
+                val res = withContext(Dispatchers.IO) { EngineHub.registry.resolveUrl(song, q, pinned) }
+                if (request != playbackRequest) return@launch
                 val item = MediaItem.Builder()
                     .setMediaId(song.key)
                     .setUri(res.url)
@@ -310,36 +384,43 @@ class PlaybackService : MediaSessionService() {
                             .build()
                     )
                     .build()
-                withContext(Dispatchers.Main) {
-                    p.setMediaItem(item)
-                    p.prepare()
-                    p.play()
-                }
+                p.setMediaItem(item)
+                p.prepare()
                 consecutiveFails = 0
-                persistQueue()
+                resolving = false
+                resolveInfo = "${res.providerId}/${res.platform}/${res.quality}"
                 com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onSongChanged(song)
-                broadcast(loading = false, resolve = "${res.providerId}/${res.platform}/${res.quality}")
+                broadcast()
                 persistQueue()
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
+                if (request != playbackRequest) return@launch
                 consecutiveFails++
-                broadcast(loading = false, error = if (consecutiveFails >= queue.size) "解析失败:队列内全部音源均不可用(后端可能暂时故障)" else "第 $queueIdx 首解析失败,自动切下一首…")
+                resolving = false
+                playbackError = if (consecutiveFails >= queue.size) "解析失败:队列内全部音源均不可用(后端可能暂时故障)" else "第 ${queueIdx + 1} 首解析失败,自动切下一首…"
+                broadcast()
                 if (consecutiveFails < queue.size && queue.size > 1) {
                     // 自动顺序跳下一首(随机模式下也顺序跳,保证不重复不遗漏)
+                    delay(800)
+                    if (request != playbackRequest) return@launch
                     queueIdx = (queueIdx + 1) % queue.size
-                    val next = queue.getOrNull(queueIdx)
-                    if (next != null) { delay(800); resolveAndPlay(); return@launch }
+                    resolveAndPlay(autoPlay = p.playWhenReady)
+                    return@launch
                 }
-                broadcast(loading = false, error = "解析失败:${e.message ?: e.toString()}")
-                withContext(Dispatchers.Main) { p.pause() }
+                playbackError = "解析失败:${e.message ?: e.toString()}"
+                broadcast()
+                p.pause()
             }
         }
     }
 
     private suspend fun advance(delta: Int) {
         if (queue.isEmpty()) return
-        queueIdx = if (playMode == "shuffle" && queue.size > 1) {
+        consecutiveFails = 0
+        queueIdx = if (queueIdx < 0) {
+            if (delta >= 0) 0 else queue.lastIndex
+        } else if (playMode == "shuffle" && queue.size > 1) {
             var next = queueIdx
             while (next == queueIdx) next = Random.nextInt(queue.size)
             next
@@ -349,19 +430,18 @@ class PlaybackService : MediaSessionService() {
         resolveAndPlay()
     }
 
-    private fun broadcast(
-        loading: Boolean? = null, error: String? = null, resolve: String? = null
-    ) {
-        val session = mediaSession ?: return
-        val args = Bundle().apply {
-            putString("queue", json.encodeToString(ListSerializer(Song.serializer()), queue))
-            putInt("index", queueIdx)
-            putBoolean("loading", loading ?: (resolveJob?.isActive == true))
-            putString("mode", playMode)
-            if (error != null) putString("error", error)
-            if (resolve != null) putString("resolve", resolve)
-        }
-        session.broadcastCustomCommand(SessionCommand(SessionCommands.STATE, Bundle.EMPTY), args)
+    private fun stateArgs(): Bundle = Bundle().apply {
+        putString("queue", queueJson)
+        putInt("index", queueIdx)
+        putBoolean("loading", resolving)
+        putString("mode", playMode)
+        putString("localTitle", localTitle)
+        putString("error", playbackError)
+        putString("resolve", resolveInfo)
+    }
+
+    private fun broadcast() {
+        mediaSession?.broadcastCustomCommand(SessionCommand(SessionCommands.STATE, Bundle.EMPTY), stateArgs())
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession
@@ -369,18 +449,21 @@ class PlaybackService : MediaSessionService() {
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
         val p = player
-        if (p == null || !p.playWhenReady || p.mediaItemCount == 0) {
+        if (!resolving && (p == null || !p.playWhenReady || p.mediaItemCount == 0)) {
             stopSelf()
         }
     }
 
     override fun onDestroy() {
+        cancelResolve()
+        com.glass.lisn.ui.overlay.DesktopLyricsOverlay.onSongChanged(null)
+        persistenceUpdates.close()
+        scope.cancel()
         mediaSession?.run {
             player.release()
             release()
             mediaSession = null
         }
-        scope.cancel()
         super.onDestroy()
     }
 }

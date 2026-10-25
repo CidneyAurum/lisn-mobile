@@ -9,11 +9,13 @@ import android.view.Gravity
 import android.view.WindowManager
 import com.glass.lisn.EngineHub
 import com.glass.lisn.model.Song
-import com.glass.lisn.ui.player.LrcLine
-import com.glass.lisn.ui.player.LrcParser
+import com.glass.lisn.engine.LrcParser
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -25,6 +27,8 @@ object DesktopLyricsOverlay {
     private val main = Handler(Looper.getMainLooper())
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var curKey: String? = null
+    private var currentSong: Song? = null
+    private var lyricsJob: Job? = null
 
     val isRunning: Boolean get() = view != null
 
@@ -53,11 +57,15 @@ object DesktopLyricsOverlay {
         }
         view = v
         curKey = null
+        onSongChanged(currentSong)
     }
 
     fun stop() {
         val v = view ?: return
         view = null
+        lyricsJob?.cancel()
+        lyricsJob = null
+        curKey = null
         main.post {
             runCatching {
                 v.context.getSystemService(WindowManager::class.java)?.removeView(v)
@@ -67,38 +75,49 @@ object DesktopLyricsOverlay {
 
     /** 服务侧:换曲时调用(线程任意);拉歌词并推给视图 */
     fun onSongChanged(song: Song?) {
-        android.util.Log.i("LisnOverlay", "onSongChanged ${song?.key} running=${view != null}")
-        val v = view ?: return
-        if (song == null || song.key == curKey) return
-        curKey = song.key
-        hasNoLyrics = true
-        main.post { v.setLyrics(emptyList(), "") }
-        scope.launch { fetchLyrics(song) }
-        scope.launch {
-            kotlinx.coroutines.delay(30_000)
-            if (view != null && song.key == curKey && hasNoLyrics) fetchLyrics(song)
+        onMain {
+            currentSong = song
+            val v = view ?: return@onMain
+            if (song != null && song.key == curKey) return@onMain
+            lyricsJob?.cancel()
+            lyricsJob = null
+            curKey = song?.key
+            v.setLyrics(emptyList(), "")
+            if (song == null) return@onMain
+            lyricsJob = scope.launch {
+                if (!fetchLyrics(song, v)) {
+                    delay(30_000)
+                    if (view === v && song.key == curKey) fetchLyrics(song, v)
+                }
+            }
         }
     }
 
-    @Volatile
-    private var hasNoLyrics = true
-
     /** 服务侧:进度推送(300ms 级,视图内部对播放插值平滑) */
     fun onPos(posMs: Long, playing: Boolean) {
-        main.post { view?.setPos(posMs, playing) }
+        onMain { view?.setPos(posMs, playing) }
     }
 
-    private suspend fun fetchLyrics(song: Song) {
-        android.util.Log.i("LisnOverlay", "fetchLyrics begin ${song.key}")
-        runCatching {
-            val raw = withContext(Dispatchers.IO) { EngineHub.registry.getLyric(song) }
-            android.util.Log.i("LisnOverlay", "fetchLyrics len=${raw?.length ?: -1}")
-            if (raw == null) { hasNoLyrics = true; return }
-            hasNoLyrics = false
-            val parsed: List<LrcLine> = LrcParser.parse(raw)
-            android.util.Log.i("LisnOverlay", "parsed=" + parsed.size + " first3=" + parsed.take(3).joinToString(" | ") { it.timeMs.toString() + ":" + it.text })
-            val list = parsed.map { LimbusOverlayView.Line(it.timeMs, it.text) }
-            main.post { view?.setLyrics(list, song.artist) }
-        }.onFailure { android.util.Log.w("LisnOverlay", "歌词获取失败: ${it.message}") }
+    private fun onMain(action: () -> Unit) {
+        if (Looper.myLooper() == Looper.getMainLooper()) action() else main.post { action() }
+    }
+
+    private suspend fun fetchLyrics(song: Song, expectedView: LimbusOverlayView): Boolean {
+        return try {
+            val lines = withContext(Dispatchers.IO) {
+                EngineHub.registry.getLyric(song)?.let { raw ->
+                    LrcParser.parse(raw).map { LimbusOverlayView.Line(it.timeMs, it.text) }
+                }.orEmpty()
+            }
+            // A slower request for the previous song must not replace the current lyrics.
+            if (view !== expectedView || song.key != curKey) return false
+            expectedView.setLyrics(lines, song.artist)
+            lines.isNotEmpty()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w("LisnOverlay", "歌词获取失败: ${e.message}")
+            false
+        }
     }
 }

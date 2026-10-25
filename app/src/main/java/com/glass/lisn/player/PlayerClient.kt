@@ -3,14 +3,12 @@ package com.glass.lisn.player
 import android.content.ComponentName
 import android.content.Context
 import android.os.Bundle
-import androidx.core.net.toUri
+import androidx.core.content.ContextCompat
 import androidx.media3.common.MediaItem
-import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionCommand
 import androidx.media3.session.SessionResult
-import com.glass.lisn.EngineHub
 import com.glass.lisn.engine.json
 import com.glass.lisn.model.Song
 import com.google.common.util.concurrent.ListenableFuture
@@ -18,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -75,8 +74,11 @@ class PlayerClient(context: Context) {
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
     private var ticker: Job? = null
+    private var lastQueueJson: String? = null
+    private var closed = false
 
     fun connect() {
+        if (closed) return
         if (controller != null) return
         if (controllerFuture != null) return
         val future = MediaController.Builder(
@@ -84,20 +86,35 @@ class PlayerClient(context: Context) {
         ).setListener(controllerListener).buildAsync()
         controllerFuture = future
         future.addListener({
+            if (controllerFuture !== future) {
+                if (!future.isCancelled) runCatching { future.get().release() }
+                return@addListener
+            }
             try {
                 controller = future.get().also { c ->
                     c.addListener(playerListener)
                 }
+                controllerFuture = null
+                syncPlayerState()
                 startTicker()
             } catch (e: Throwable) {
-                android.util.Log.e("PlayerClient", "连接播放服务失败", e)
+                if (!future.isCancelled) android.util.Log.e("PlayerClient", "连接播放服务失败", e)
                 controllerFuture = null
             }
-        }, { it.run() })
+        }, ContextCompat.getMainExecutor(appContext))
     }
 
     /** 接收服务侧状态广播(队列快照/加载/错误) */
     private val controllerListener = object : androidx.media3.session.MediaController.Listener {
+        override fun onDisconnected(controller: MediaController) {
+            if (this@PlayerClient.controller !== controller) return
+            ticker?.cancel()
+            ticker = null
+            this@PlayerClient.controller = null
+            _isPlaying.value = false
+            _isBuffering.value = false
+        }
+
         override fun onCustomCommand(
             controller: MediaController,
             command: androidx.media3.session.SessionCommand,
@@ -120,9 +137,25 @@ class PlayerClient(context: Context) {
         }
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             _currentMediaId.value = mediaItem?.mediaId
+            _currentLocalTitle.value = mediaItem?.takeIf { it.mediaId.startsWith("local:") }
+                ?.mediaMetadata?.title?.toString()
             _durationMs.value = 0
             _positionMs.value = 0
         }
+        override fun onEvents(player: Player, events: Player.Events) { syncPlayerState() }
+    }
+
+    private fun syncPlayerState() {
+        val c = controller ?: return
+        _isPlaying.value = c.isPlaying
+        _isBuffering.value = c.playbackState == Player.STATE_BUFFERING
+        _positionMs.value = if (c.playbackState == Player.STATE_IDLE) 0 else c.currentPosition.coerceAtLeast(0)
+        _durationMs.value = if (c.playbackState == Player.STATE_READY || c.playbackState == Player.STATE_BUFFERING) {
+            c.duration.coerceAtLeast(0)
+        } else 0
+        _currentMediaId.value = c.currentMediaItem?.mediaId
+        _currentLocalTitle.value = c.currentMediaItem?.takeIf { it.mediaId.startsWith("local:") }
+            ?.mediaMetadata?.title?.toString()
     }
 
     private fun startTicker() {
@@ -143,9 +176,11 @@ class PlayerClient(context: Context) {
 
     fun play(song: Song, queue: List<Song>, index: Int = -1) {
         val c = controller ?: return
+        val encodedQueue = lastQueueJson?.takeIf { queue == _playback.value.queue }
+            ?: json.encodeToString(kotlinx.serialization.builtins.ListSerializer(Song.serializer()), queue)
         val args = Bundle().apply {
             putString("song", json.encodeToString(Song.serializer(), song))
-            putString("queue", json.encodeToString(kotlinx.serialization.builtins.ListSerializer(Song.serializer()), queue))
+            putString("queue", encodedQueue)
             putInt("index", index)
         }
         c.sendCustomCommand(SessionCommand(SessionCommands.PLAY, Bundle.EMPTY), args)
@@ -159,8 +194,29 @@ class PlayerClient(context: Context) {
         c.sendCustomCommand(SessionCommand(SessionCommands.PLAY_LOCAL, Bundle.EMPTY), args)
     }
 
-    fun toggle() { controller?.takeIf { it.isCommandAvailable(Player.COMMAND_PLAY_PAUSE) }?.let { if (it.isPlaying) it.pause() else it.play() } }
-    fun seekTo(ms: Long) { controller?.seekTo(ms) }
+    fun toggle() {
+        val c = controller?.takeIf { it.isCommandAvailable(Player.COMMAND_PLAY_PAUSE) } ?: return
+        val state = _playback.value
+        val song = state.queue.getOrNull(state.queueIdx)
+        if (c.playbackState == Player.STATE_IDLE && !state.loading) {
+            if (song != null) {
+                play(song, state.queue, state.queueIdx)
+            } else if (c.mediaItemCount > 0) {
+                c.prepare()
+                c.play()
+            }
+            return
+        }
+        // playWhenReady also represents the user's intent while buffering or resolving.
+        if (c.playWhenReady) c.pause() else c.play()
+    }
+    fun seekTo(ms: Long) {
+        controller?.let { c ->
+            val target = ms.coerceAtLeast(0)
+            c.seekTo(target)
+            _positionMs.value = target
+        }
+    }
     fun next() { controller?.sendCustomCommand(SessionCommand(SessionCommands.NEXT, Bundle.EMPTY), Bundle.EMPTY) }
     fun prev() { controller?.sendCustomCommand(SessionCommand(SessionCommands.PREV, Bundle.EMPTY), Bundle.EMPTY) }
 
@@ -186,10 +242,12 @@ class PlayerClient(context: Context) {
 
     /** 控制器侧接收服务广播(在 service 中回调,见 PlaybackService.stateBroadcast) */
     fun onStateBroadcast(args: Bundle) {
-        val queueJson = args.getString("queue") ?: return
-        val queue = runCatching {
-            json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(Song.serializer()), queueJson)
-        }.getOrDefault(emptyList())
+        val queueJson = args.getString("queue")
+        val queue = if (queueJson == null || queueJson == lastQueueJson) _playback.value.queue else {
+            runCatching {
+                json.decodeFromString(kotlinx.serialization.builtins.ListSerializer(Song.serializer()), queueJson)
+            }.getOrNull()?.also { lastQueueJson = queueJson } ?: _playback.value.queue
+        }
         _playback.value = PlaybackState(
             queue = queue,
             queueIdx = args.getInt("index", -1),
@@ -203,9 +261,24 @@ class PlayerClient(context: Context) {
 
     suspend fun release() {
         withContext(Dispatchers.Main) {
+            ticker?.cancel()
+            ticker = null
+            val pending = controllerFuture
+            controllerFuture = null
+            pending?.let { MediaController.releaseFuture(it) }
             controller?.release()
             controller = null
-            controllerFuture = null
+            _isPlaying.value = false
+            _isBuffering.value = false
+        }
+    }
+
+    /** viewModelScope is already cancelled when onCleared runs; finish on our own main scope. */
+    fun close() {
+        if (closed) return
+        closed = true
+        scope.launch(Dispatchers.Main.immediate) {
+            try { release() } finally { scope.cancel() }
         }
     }
 }

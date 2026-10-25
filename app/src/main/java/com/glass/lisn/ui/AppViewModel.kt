@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.glass.lisn.EngineHub
 import com.glass.lisn.data.DownloadManager
 import com.glass.lisn.engine.HttpSourceConfig
+import com.glass.lisn.engine.SearchResults
 import com.glass.lisn.engine.dailyKeywords
 import com.glass.lisn.model.LibraryFile
 import com.glass.lisn.model.Settings
@@ -17,8 +18,15 @@ import com.glass.lisn.model.SourcesSnapshot
 import com.glass.lisn.model.UserPlaylist
 import com.glass.lisn.player.PlayerClient
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class View(val label: String) {
     DISCOVER("发现"), SEARCH("搜索"), PLAYLISTS("歌单"),
@@ -45,7 +53,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var searched by mutableStateOf(false)
     var searchError by mutableStateOf<String?>(null)
     private val picPending = mutableSetOf<String>()
+    private val picRequests = linkedMapOf<String, Song>()
+    private var picJob: Job? = null
     private var searchJob: Job? = null
+    private var searchVersion = 0L
+    private var searchedKeyword = ""
 
     // 播放联动:UI 通过 player.playback / isPlaying 等 StateFlow collectAsState 观察
 
@@ -60,7 +72,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         // 下载完成后自动刷新本地音乐列表
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+        viewModelScope.launch {
             var lastCompleted = -1
             EngineHub.downloads.queue.collect { list ->
                 val done = list.count { it.status == com.glass.lisn.model.DownloadStatus.COMPLETED }
@@ -78,16 +90,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         refreshSources()
         refreshPlaylists()
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            EngineHub.registry.mf.loadAll()
-            EngineHub.registry.lx.loadAll()
-            EngineHub.rebuild()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                EngineHub.registry.mf.loadAll()
+                EngineHub.registry.lx.loadAll()
+                EngineHub.rebuild()
+            }
             refreshSources()
         }
-        if (settings.autoCheckUpdates) viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            runCatching { EngineHub.registry.mf.checkUpdates() }
-            runCatching { EngineHub.registry.lx.checkUpdates() }
-            EngineHub.rebuild()
+        if (settings.autoCheckUpdates) viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching { EngineHub.registry.mf.checkUpdates() }
+                runCatching { EngineHub.registry.lx.checkUpdates() }
+                EngineHub.rebuild()
+            }
             refreshSources()
         }
     }
@@ -105,12 +121,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun doSearch(kw: String? = null) {
         val k = (kw ?: keyword).trim()
-        if (k.isEmpty() || searching) return
+        if (k.isEmpty()) return
+        startSearch(k)
+    }
+
+    private fun startSearch(k: String, playFirst: Boolean = false) {
+        val version = ++searchVersion
         searchJob?.cancel()
+        picJob?.cancel()
+        picJob = null
+        picRequests.clear()
+        picPending.clear()
         keyword = k
-        EngineHub.searchHistory.record(k)
-        searchHistory = EngineHub.searchHistory.items
+        searchedKeyword = k
         searching = true
+        loadingMore = false
         searched = true
         searchError = null
         results = emptyList()
@@ -118,53 +143,87 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         hasMore = false
         searchJob = viewModelScope.launch {
             try {
+                withContext(Dispatchers.IO) { EngineHub.searchHistory.record(k) }
+                if (version != searchVersion) return@launch
+                searchHistory = EngineHub.searchHistory.items
                 val r = EngineHub.registry.search(k, 1)
+                ensureActive()
+                if (version != searchVersion) return@launch
                 results = r.songs
                 hasMore = r.hasMore
-                searching = false
                 ensurePics(r.songs)
+                if (playFirst) {
+                    view = View.SEARCH
+                    if (r.songs.isEmpty()) showToast("「$k」无结果")
+                    else play(r.songs.first(), r.songs)
+                }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Throwable) {
-                searching = false
-                searchError = e.message ?: e.toString()
+                if (version == searchVersion) {
+                    searchError = e.message ?: e.toString()
+                    if (playFirst) showToast("播放失败:$searchError")
+                }
+            } finally {
+                if (version == searchVersion) searching = false
             }
         }
     }
 
     fun loadMore() {
-        if (keyword.isEmpty() || searching || loadingMore || !hasMore) return
+        if (searchedKeyword.isEmpty() || searching || loadingMore || !hasMore) return
+        val version = searchVersion
+        val k = searchedKeyword
+        val nextPage = page + 1
         loadingMore = true
-        viewModelScope.launch {
+        searchJob = viewModelScope.launch {
             try {
-                val r = EngineHub.registry.search(keyword, page + 1)
-                results = r.songs
+                val r = EngineHub.registry.search(k, nextPage)
+                ensureActive()
+                if (version != searchVersion) return@launch
+                // Use the current list after the request, preserving covers loaded meanwhile.
+                results = SearchResults.merge(results, r.songs)
                 hasMore = r.hasMore
                 page = r.page
-                loadingMore = false
-                ensurePics(r.songs)
+                ensurePics(results)
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Throwable) {
-                loadingMore = false
-                hasMore = false
+                if (version == searchVersion) hasMore = false
+            } finally {
+                if (version == searchVersion) loadingMore = false
             }
         }
     }
 
-    /** 前 60 首惰性补封面(与桌面端一致的错峰策略) */
+    /** Keep at most four cover requests active; publish one result-list update per batch. */
     private fun ensurePics(songs: List<Song>) {
-        var i = 0
         for (s in songs.take(60)) {
-            if (!s.picUrl.isNullOrEmpty() || picPending.contains(s.key)) continue
-            picPending.add(s.key)
-            val idx = i++
-            viewModelScope.launch {
-                delay(120L * idx)
-                try {
-                    val pic = EngineHub.registry.getPic(s)
-                    if (!pic.isNullOrEmpty()) {
-                        results = results.map { if (it.key == s.key) it.copy(picUrl = pic) else it }
-                    }
-                } catch (_: Throwable) { /* ignore */ } finally {
-                    picPending.remove(s.key)
+            if (s.picUrl.isNullOrEmpty() && picPending.add(s.key)) picRequests[s.key] = s
+        }
+        if (picJob?.isActive == true || picRequests.isEmpty()) return
+        val version = searchVersion
+        picJob = viewModelScope.launch {
+            while (picRequests.isNotEmpty()) {
+                val batch = picRequests.values.take(4)
+                batch.forEach { picRequests.remove(it.key) }
+                val covers = coroutineScope {
+                    batch.map { song ->
+                        async {
+                            try {
+                                EngineHub.registry.getPic(song)?.let { song.key to it }
+                            } catch (e: CancellationException) {
+                                throw e
+                            } catch (_: Exception) {
+                                null
+                            }
+                        }
+                    }.awaitAll().filterNotNull().toMap()
                 }
+                ensureActive()
+                if (version != searchVersion) return@launch
+                results = SearchResults.withCovers(results, covers)
+                batch.forEach { picPending.remove(it.key) }
             }
         }
     }
@@ -191,17 +250,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         EngineHub.rebuild()
         refreshSources()
         if (enabled) viewModelScope.launch {
-            EngineHub.registry.mf.loadAll()
-            EngineHub.rebuild()
+            withContext(Dispatchers.IO) {
+                EngineHub.registry.mf.loadAll()
+                EngineHub.rebuild()
+            }
             refreshSources()
         }
     }
 
     fun setLxEnabled(id: String, enabled: Boolean) {
         EngineHub.registry.lx.setEnabled(id, enabled)
-        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            if (enabled) EngineHub.registry.lx.loadAll()
-            EngineHub.rebuild()
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                if (enabled) EngineHub.registry.lx.loadAll()
+                EngineHub.rebuild()
+            }
             refreshSources()
         }
     }
@@ -226,8 +289,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun upgradeMf(id: String, onDone: (Boolean, String) -> Unit) {
         viewModelScope.launch {
-            val (ok, detail) = EngineHub.registry.mf.upgrade(id)
-            EngineHub.rebuild()
+            val (ok, detail) = withContext(Dispatchers.IO) {
+                val result = EngineHub.registry.mf.upgrade(id)
+                EngineHub.rebuild()
+                result
+            }
             refreshSources()
             onDone(ok, detail)
         }
@@ -235,8 +301,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun checkUpdates(onDone: () -> Unit) {
         viewModelScope.launch {
-            runCatching { EngineHub.registry.mf.checkUpdates() }
-            EngineHub.rebuild()
+            withContext(Dispatchers.IO) {
+                try { EngineHub.registry.mf.checkUpdates() }
+                catch (e: CancellationException) { throw e }
+                catch (_: Exception) { /* Keep cached sources if the update server is unavailable. */ }
+                EngineHub.rebuild()
+            }
             refreshSources()
             onDone()
         }
@@ -280,8 +350,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val p = EngineHub.registry.providers.find { it.id == id }
             if (p == null) { onDone(false, "未找到音源"); return@launch }
             try {
-                val (ok, detail) = p.test()
+                val (ok, detail) = withContext(Dispatchers.IO) { p.test() }
                 onDone(ok, detail)
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Throwable) {
                 onDone(false, e.message ?: e.toString())
             }
@@ -366,24 +438,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /** 每日推荐一键播放:搜索关键词并直接播放首曲(入队整页结果) */
     fun playKeyword(kw: String) {
-        viewModelScope.launch {
-            try {
-                val r = EngineHub.registry.search(kw, 1)
-                if (r.songs.isEmpty()) { showToast("「$kw」无结果"); return@launch }
-                results = r.songs
-                keyword = kw
-                hasMore = r.hasMore
-                page = r.page
-                searched = true
-                searchError = null
-                EngineHub.searchHistory.record(kw)
-                searchHistory = EngineHub.searchHistory.items
-                view = View.SEARCH
-                play(r.songs.first(), r.songs)
-            } catch (e: Throwable) {
-                showToast("播放失败:${e.message ?: e.toString()}")
-            }
-        }
+        val k = kw.trim()
+        if (k.isNotEmpty()) startSearch(k, playFirst = true)
     }
 
     fun removeSearchHistory(kw: String) {
@@ -400,5 +456,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             library = DownloadManager.scanLibrary(getApplication())
         }
+    }
+
+    override fun onCleared() {
+        player.close()
+        super.onCleared()
     }
 }

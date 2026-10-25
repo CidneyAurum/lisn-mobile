@@ -89,15 +89,15 @@ fun PlayerDock(vm: AppViewModel) {
             }
             IconButton(onClick = {
                 // 进程重启后播放器为空:有队列记忆时点播放 = 重播当前曲
-                if (!isPlaying && !buffering && song != null &&
+                if (!isPlaying && !buffering && !playback.loading && song != null &&
                     (vm.player.durationMs.value <= 0L) && playback.queue.isNotEmpty()
                 ) {
                     vm.player.play(song, playback.queue, playback.queueIdx)
                 } else {
                     vm.player.toggle()
                 }
-            }, enabled = !buffering) {
-                if (buffering) {
+            }) {
+                if (buffering || playback.loading) {
                     androidx.compose.material3.CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 } else if (isPlaying) {
                     Icon(Icons.Filled.Pause, "暂停")

@@ -24,6 +24,7 @@ class LimbusOverlayView(context: Context) : View(context) {
     private val density = resources.displayMetrics.density
 
     private var lines: List<Line> = emptyList()
+    private var lineTimes = LongArray(0)
     private var artist = ""
     private var basePosMs = 0L
     private var basePosTick = 0L
@@ -68,8 +69,10 @@ class LimbusOverlayView(context: Context) : View(context) {
     // ---- 外部输入 ----
 
     fun setLyrics(newLines: List<Line>, newArtist: String) {
-        lines = newLines
         artist = newArtist
+        // Credit filtering is independent of playback time; never run these regexes per frame.
+        lines = newLines.filter { !isFiltered(it.text) && !isMeta(it.text) }.sortedBy { it.timeMs }
+        lineTimes = LongArray(lines.size) { lines[it].timeMs }
         shownIdx = -1
         chars = CharArray(0)
         charShown = 0
@@ -113,11 +116,12 @@ class LimbusOverlayView(context: Context) : View(context) {
         Regex("offvocal", RegexOption.IGNORE_CASE), Regex("カラオケ"), Regex("karaoke", RegexOption.IGNORE_CASE),
     )
     private val colonCredit = Regex("^[^\\s:：]{1,6}[：:]")
+    private val artistSeparator = Regex("[-–—]")
     private fun isFiltered(t: String): Boolean =
         creditPatterns.any { it.containsMatchIn(t) } || instPatterns.any { it.containsMatchIn(t) } ||
             (t.length < 40 && colonCredit.containsMatchIn(t))
     private fun isMeta(t: String): Boolean =
-        artist.length >= 2 && t.length < 60 && t.contains(Regex("[-–—]")) && t.contains(artist)
+        artist.length >= 2 && t.length < 60 && t.contains(artistSeparator) && t.contains(artist)
 
     // ---- 主循环(帧驱动) ----
 
@@ -135,15 +139,8 @@ class LimbusOverlayView(context: Context) : View(context) {
 
         val w = width.toFloat()
         val h = height.toFloat()
-        // 字号:随视图宽度等比
-        fontPx = (w * 0.052f).coerceIn(34f, 96f)
-
-        // 定位当前行(跳过职员表/伴奏/元数据行)
-        var cur = -1
-        for (i in lines.indices) {
-            val l = lines[i]
-            if (l.timeMs <= posNow && !isFiltered(l.text) && !isMeta(l.text)) cur = i
-        }
+        // The timeline was filtered once in setLyrics. Find its last timestamp <= position.
+        val cur = lyricLineIndex(lineTimes, posNow)
 
         // 切句:旧句入淡出队列
         if (cur != shownIdx) {
@@ -158,6 +155,7 @@ class LimbusOverlayView(context: Context) : View(context) {
             }
             shownIdx = cur
             if (cur >= 0) {
+                fontPx = (w * 0.052f).coerceIn(34f, 96f)
                 chars = CharArray(lines[cur].text.length) { lines[cur].text[it] }
                 charShown = 0
                 // 量宽适配
@@ -214,11 +212,14 @@ class LimbusOverlayView(context: Context) : View(context) {
         }
 
         // 闲置停机:无当前行且无淡出行;或暂停定格且无淡出行
-        val paused = now - posChangedAt > 2500
+        val paused = !playing || now - posChangedAt > 2500
         if ((cur < 0 && fading.isEmpty()) || (paused && fading.isEmpty())) {
-            if (fading.isEmpty() && (cur < 0 || shownIdx >= 0)) {
+            if (cur >= 0) {
+                // Leave the paused lyric visible, but stop scheduling animation frames.
+                paintFrame(canvas, cur)
+            } else {
                 canvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
-                if (cur < 0) shownIdx = -1
+                shownIdx = -1
             }
             scheduled = false
             return

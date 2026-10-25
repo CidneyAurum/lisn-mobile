@@ -37,6 +37,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -53,42 +54,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.glass.lisn.EngineHub
+import com.glass.lisn.engine.LrcLine
+import com.glass.lisn.engine.LrcParser
 import com.glass.lisn.ui.AppViewModel
 import com.glass.lisn.ui.theme.Aurora3
 import com.glass.lisn.ui.theme.Text1
 import com.glass.lisn.ui.theme.Text2
 import com.glass.lisn.ui.theme.Text3
 import kotlinx.coroutines.launch
-
-data class LrcLine(val timeMs: Long, val text: String)
-
-object LrcParser {
-    /** 兼容标准 [mm:ss.xx] 与酷我的 [ss.xx] 秒制时间戳 */
-    private val lineRegex = Regex("""\[(\d{1,3})(?::(\d{1,2}))?(?:[.:](\d{1,3}))?]""")
-
-    private fun fracMs(raw: String): Long = when (raw.length) {
-        0 -> 0L; 1 -> raw.toLong() * 100; 2 -> raw.toLong() * 10; else -> raw.take(3).toLong()
-    }
-
-    fun parse(lrc: String): List<LrcLine> {
-        val out = mutableListOf<LrcLine>()
-        for (raw in lrc.lineSequence()) {
-            val stamps = lineRegex.findAll(raw).toList()
-            if (stamps.isEmpty()) continue
-            val text = raw.substring(stamps.last().range.last + 1).trim()
-            for (m in stamps) {
-                val g1 = m.groupValues[1]; val g2 = m.groupValues[2]; val g3 = m.groupValues[3]
-                val timeMs = if (g2.isEmpty()) {
-                    g1.toLong() * 1000 + fracMs(g3)          // [ss.xx]
-                } else {
-                    g1.toLong() * 60000 + g2.toLong() * 1000 + fracMs(g3)  // [mm:ss.xx]
-                }
-                out += LrcLine(timeMs, text)
-            }
-        }
-        return out.sortedBy { it.timeMs }
-    }
-}
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun NowPlayingSheet(vm: AppViewModel) {
@@ -115,8 +91,14 @@ fun NowPlayingSheet(vm: AppViewModel) {
     LaunchedEffect(song?.key ?: localTitle) {
         lrc = emptyList()
         val s = song ?: return@LaunchedEffect
-        runCatching { EngineHub.registry.getLyric(s) }.getOrNull()?.let { raw ->
-            lrc = LrcParser.parse(raw)
+        try {
+            lrc = withContext(Dispatchers.IO) {
+                EngineHub.registry.getLyric(s)?.let(LrcParser::parse).orEmpty()
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            lrc = emptyList()
         }
     }
 
@@ -343,7 +325,7 @@ fun NowPlayingSheet(vm: AppViewModel) {
                     .clickable { vm.player.toggle() },
                 contentAlignment = Alignment.Center
             ) {
-                if (buffering) CircularProgressIndicator(Modifier.size(30.dp), color = MaterialTheme.colorScheme.background, strokeWidth = 3.dp)
+                if (buffering || playback.loading) CircularProgressIndicator(Modifier.size(30.dp), color = MaterialTheme.colorScheme.background, strokeWidth = 3.dp)
                 else Icon(
                     if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     "播放/暂停",
@@ -422,10 +404,18 @@ private fun SleepTimerDialog(onDismiss: () -> Unit, onPick: (Int) -> Unit) {
 private fun ProgressSection(vm: AppViewModel) {
     val positionMs by vm.player.positionMs.collectAsState()
     val durationMs by vm.player.durationMs.collectAsState()
+    val mediaId by vm.player.currentMediaId.collectAsState()
+    var dragProgress by remember(mediaId) { mutableStateOf<Float?>(null) }
+    val shownPosition = dragProgress?.let { (it * durationMs).toLong() } ?: positionMs
     Column(Modifier.fillMaxWidth().padding(top = 12.dp)) {
         Slider(
-            value = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
-            onValueChange = { if (durationMs > 0) vm.player.seekTo((it * durationMs).toLong()) },
+            value = dragProgress ?: if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f,
+            onValueChange = { dragProgress = it },
+            onValueChangeFinished = {
+                dragProgress?.let { if (durationMs > 0) vm.player.seekTo((it * durationMs).toLong()) }
+                dragProgress = null
+            },
+            enabled = durationMs > 0,
             colors = SliderDefaults.colors(
                 thumbColor = MaterialTheme.colorScheme.primary,
                 activeTrackColor = MaterialTheme.colorScheme.primary,
@@ -433,7 +423,7 @@ private fun ProgressSection(vm: AppViewModel) {
             )
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(formatMs(positionMs), style = MaterialTheme.typography.labelSmall, color = Text3)
+            Text(formatMs(shownPosition), style = MaterialTheme.typography.labelSmall, color = Text3)
             Text(formatMs(durationMs), style = MaterialTheme.typography.labelSmall, color = Text3)
         }
     }
@@ -442,9 +432,9 @@ private fun ProgressSection(vm: AppViewModel) {
 /** 歌词子组件:滚动同步的高频状态只重组此区块 */
 @Composable
 private fun LyricSection(vm: AppViewModel, lrc: List<LrcLine>) {
-    val positionMs by vm.player.positionMs.collectAsState()
-    val currentLine = remember(lrc, positionMs) {
-        if (lrc.isEmpty()) -1 else (lrc.indexOfLast { it.timeMs <= positionMs + 300 }.takeIf { it >= 0 } ?: -1)
+    val position = vm.player.positionMs.collectAsState()
+    val currentLine by remember(lrc, position) {
+        derivedStateOf { lrc.indexOfLast { it.timeMs <= position.value + 300 } }
     }
     val listState = rememberLazyListState()
     LaunchedEffect(currentLine) {
